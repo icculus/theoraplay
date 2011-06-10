@@ -1,0 +1,4 @@
+syntax:glob
+*.dSYM
+*.exe
+testtheoraplay
