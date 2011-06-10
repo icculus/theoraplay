@@ -37,6 +37,7 @@ THEORAPLAY_Decoder *THEORAPLAY_startDecode(const char *fname,
                                            const unsigned int maxframes);
 void THEORAPLAY_stopDecode(THEORAPLAY_Decoder *decoder);
 int THEORAPLAY_isDecoding(THEORAPLAY_Decoder *decoder);
+int THEORAPLAY_decodingError(THEORAPLAY_Decoder *decoder);
 
 const THEORAPLAY_PcmAudioItem *THEORAPLAY_getAudio(THEORAPLAY_Decoder *decoder);
 void THEORAPLAY_freeAudio(const THEORAPLAY_PcmAudioItem *item);

@@ -41,7 +41,11 @@ int main(int argc, char **argv)
                 usleep(10000);
         } // while
 
-        printf("done with this file!\n");
+        if (THEORAPLAY_decodingError(decoder))
+            printf("There was an error decoding this file!\n");
+        else
+            printf("done with this file!\n");
+
         THEORAPLAY_stopDecode(decoder);
     } // for
 
