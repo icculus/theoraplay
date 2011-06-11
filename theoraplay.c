@@ -497,7 +497,8 @@ void THEORAPLAY_stopDecode(THEORAPLAY_Decoder *decoder)
 int THEORAPLAY_isDecoding(THEORAPLAY_Decoder *decoder)
 {
     const TheoraDecoder *ctx = (TheoraDecoder *) decoder;
-    return (ctx && ctx->thread_created && !ctx->thread_done);
+    return ( ctx && (ctx->audiolist || ctx->videolist ||
+             (ctx->thread_created && !ctx->thread_done)) );
 } // THEORAPLAY_isDecoding
 
 
