@@ -12,7 +12,7 @@
 
 int main(int argc, char **argv)
 {
-    THEORAPLAY_Decoder *decoder;
+    THEORAPLAY_Decoder *decoder = NULL;
     const THEORAPLAY_YuvVideoItem *video = NULL;
     const THEORAPLAY_PcmAudioItem *audio = NULL;
 
