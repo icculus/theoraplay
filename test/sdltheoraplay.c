@@ -184,7 +184,33 @@ static void playfile(const char *fname)
         {
             //printf("Play video frame (%u ms)!\n", video->playms);
             if ( framems && ((now - video->playms) >= framems) )
-                ; // do nothing, skip this frame to catch up.
+            {
+                // Skip frames to catch up, but keep track of the last one
+                //  in case we catch up to a series of dupe frames, which
+                //  means we'd have to draw that final frame and then wait for
+                //  more.
+                const THEORAPLAY_YuvVideoItem *last = video;
+                while ((video = THEORAPLAY_getVideo(decoder)) != NULL)
+                {
+                    THEORAPLAY_freeVideo(last);
+                    last = video;
+                    if ((now - video->playms) < framems)
+                        break;
+                } // while
+
+                if (!video)
+                    video = last;
+            } // if
+
+            if (!video)  // do nothing; we're far behind and out of options.
+            {
+                static int warned = 0;
+                if (warned)
+                {
+                    warned = 1;
+                    fprintf(stderr, "WARNING: Playback can't keep up!\n");
+                } // if
+            } // if
 
             else if (SDL_LockYUVOverlay(overlay) == -1)
             {
