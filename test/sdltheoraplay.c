@@ -97,9 +97,16 @@ static void playfile(const char *fname)
     SDL_Surface *screen = NULL;
     SDL_Overlay *overlay = NULL;
     SDL_Event event;
+    int initfailed = 0;
     int quit = 0;
 
     printf("Trying file '%s' ...\n", fname);
+    decoder = THEORAPLAY_startDecode(fname, 20);
+    if (!decoder)
+    {
+        fprintf(stderr, "Failed to start decoding '%s'!\n", fname);
+        return;
+    } // if
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == -1)
     {
@@ -113,8 +120,6 @@ static void playfile(const char *fname)
     else
         basefname++;
     SDL_WM_SetCaption(basefname, basefname);
-
-    decoder = THEORAPLAY_startDecode(fname, 20);
 
     // wait until we have a video and audio packet, so we can set up hardware.
     // !!! FIXME: we need an API to decide if this file has only audio/video.
@@ -144,7 +149,7 @@ static void playfile(const char *fname)
                 fprintf(stderr, "YUV Overlay failed: %s\n", SDL_GetError());
         } // else
 
-        quit = (!screen || !overlay);
+        initfailed = quit = (!screen || !overlay);
     } // if
 
     // Open the audio device as soon as we know what it should be.
@@ -157,24 +162,12 @@ static void playfile(const char *fname)
         spec.channels = audio->channels;
         spec.samples = 2048;
         spec.callback = audio_callback;
-        quit = (SDL_OpenAudio(&spec, NULL) != 0);
-    } // if
-
-    if ( (video && (!screen || !overlay))
-         /*|| (audio && !openedaudio)*/ )
-    {
-        SDL_CloseAudio();
-        if (overlay) SDL_FreeYUVOverlay(overlay);
-        SDL_Quit();
-        if (video) THEORAPLAY_freeVideo(video);
-        if (audio) THEORAPLAY_freeAudio(audio);
-        THEORAPLAY_stopDecode(decoder);
-        return;
+        initfailed = quit = (SDL_OpenAudio(&spec, NULL) != 0);
     } // if
 
     baseticks = SDL_GetTicks();
 
-    if (audio)
+    if (!quit && audio)
         SDL_PauseAudio(0);
 
     while (!quit && THEORAPLAY_isDecoding(decoder))
@@ -275,13 +268,17 @@ static void playfile(const char *fname)
         } // while
     } // while
 
-    if (THEORAPLAY_decodingError(decoder))
+    if (initfailed)
+        printf("Initialization failed!\n");
+    else if (THEORAPLAY_decodingError(decoder))
         printf("There was an error decoding this file!\n");
     else
         printf("done with this file!\n");
 
-    THEORAPLAY_stopDecode(decoder);
-    SDL_FreeYUVOverlay(overlay);
+    if (overlay) SDL_FreeYUVOverlay(overlay);
+    if (video) THEORAPLAY_freeVideo(video);
+    if (audio) THEORAPLAY_freeAudio(audio);
+    if (decoder) THEORAPLAY_stopDecode(decoder);
     SDL_CloseAudio();
     SDL_Quit();
 } // playfile
