@@ -530,9 +530,12 @@ const PcmAudioItem *THEORAPLAY_getAudio(THEORAPLAY_Decoder *decoder)
 void THEORAPLAY_freeAudio(const PcmAudioItem *_item)
 {
     PcmAudioItem *item = (PcmAudioItem *) _item;
-    assert(item->next == NULL);
-    free(item->samples);
-    free(item);
+    if (item != NULL)
+    {
+        assert(item->next == NULL);
+        free(item->samples);
+        free(item);
+    } // if
 } // THEORAPLAY_freeAudio
 
 
@@ -561,9 +564,12 @@ const YuvVideoItem *THEORAPLAY_getVideo(THEORAPLAY_Decoder *decoder)
 void THEORAPLAY_freeVideo(const YuvVideoItem *_item)
 {
     YuvVideoItem *item = (YuvVideoItem *) _item;
-    assert(item->next == NULL);
-    free(item->yuv);
-    free(item);
+    if (item != NULL)
+    {
+        assert(item->next == NULL);
+        free(item->yuv);
+        free(item);
+    } // if
 } // THEORAPLAY_freeVideo
 
 // end of theoraplay.cpp ...
