@@ -28,6 +28,7 @@ typedef struct THEORAPLAY_PcmAudioItem
 {
     unsigned int playms;  // playback start time in milliseconds.
     int channels;
+    int freq;
     int frames;
     float *samples;  // frames * channels float32 samples.
     struct THEORAPLAY_PcmAudioItem *next;

@@ -244,6 +244,7 @@ static void WorkerThread(TheoraDecoder *ctx)
                 if (item == NULL) goto cleanup;
                 item->playms = (unsigned long) ((((double) audioframes) / ((double) vinfo.rate)) * 1000.0);
                 item->channels = channels;
+                item->freq = vinfo.rate;
                 item->frames = frames;
                 item->samples = (float *) malloc(sizeof (float) * frames * channels);
                 item->next = NULL;
