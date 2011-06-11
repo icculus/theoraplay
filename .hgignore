@@ -2,3 +2,4 @@ syntax:glob
 *.dSYM
 *.exe
 testtheoraplay
+sdltheoraplay
