@@ -334,14 +334,10 @@ printf("Decoded %d frames of audio.\n", (int) frames);
                         yuv = item->yuv;
                         for (i = 0; i < h; i++, yuv += w)
                             memcpy(yuv, ycbcr[0].data + yoff + ycbcr[0].stride * i, w);
-
-                        for (i = 0; i < (h / 2); i++)
-                        {
+                        for (i = 0; i < (h / 2); i++, yuv += w/2)
                             memcpy(yuv, ycbcr[2].data + uvoff + ycbcr[2].stride * i, w / 2);
-                            yuv += w;
+                        for (i = 0; i < (h / 2); i++, yuv += w/2)
                             memcpy(yuv, ycbcr[1].data + uvoff + ycbcr[1].stride * i, w / 2);
-                            yuv += w;
-                        } // for
 
                         printf("Decoded another video frame.\n");
                         pthread_mutex_lock(&ctx->lock);
