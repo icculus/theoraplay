@@ -252,7 +252,7 @@ static void playfile(const char *fname)
             {
                 case SDL_VIDEOEXPOSE:
                 {
-                    SDL_Rect dstrect = { 0, 0, video->width, video->height };
+                    SDL_Rect dstrect = { 0, 0, screen->w, screen->h };
                     SDL_DisplayYUVOverlay(overlay, &dstrect);
                     break;
                 } // case
