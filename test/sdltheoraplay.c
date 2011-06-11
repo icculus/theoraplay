@@ -268,6 +268,15 @@ static void playfile(const char *fname)
         } // while
     } // while
 
+    while (!quit)
+    {
+        SDL_LockAudio();
+        quit = (audio_queue == NULL);
+        SDL_UnlockAudio();
+        if (!quit)
+            SDL_Delay(100);  // wait for final audio packets to play out.
+    } // while
+
     if (initfailed)
         printf("Initialization failed!\n");
     else if (THEORAPLAY_decodingError(decoder))
