@@ -236,6 +236,10 @@ static void playfile(const char *fname)
             THEORAPLAY_freeVideo(video);
             video = NULL;
         } // if
+        else  // no new video frame? Give up some CPU.
+        {
+            SDL_Delay(10);
+        } // else
 
         if (!audio)
             audio = THEORAPLAY_getAudio(decoder);
