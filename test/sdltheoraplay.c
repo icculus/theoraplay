@@ -253,6 +253,13 @@ static void playfile(const char *fname)
         {
             switch (event.type)
             {
+                case SDL_VIDEOEXPOSE:
+                {
+                    SDL_Rect dstrect = { 0, 0, video->width, video->height };
+                    SDL_DisplayYUVOverlay(overlay, &dstrect);
+                    break;
+                } // case
+
                 case SDL_QUIT:
                     quit = 1;
                     break;
