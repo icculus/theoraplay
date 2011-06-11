@@ -249,7 +249,7 @@ static void playfile(const char *fname)
         } // if
 
         // Pump the event loop here.
-        while (SDL_PollEvent(&event))
+        while (screen && SDL_PollEvent(&event))
         {
             switch (event.type)
             {
