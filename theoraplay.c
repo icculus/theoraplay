@@ -257,7 +257,7 @@ static void WorkerThread(TheoraDecoder *ctx)
 
                 // I bet this beats the crap out of the CPU cache...
                 samples = item->samples;
-                for (frameidx = 0; frameidx < channels; frameidx++)
+                for (frameidx = 0; frameidx < frames; frameidx++)
                 {
                     for (chanidx = 0; chanidx < channels; chanidx++)
                         *(samples++) = pcm[chanidx][frameidx];
