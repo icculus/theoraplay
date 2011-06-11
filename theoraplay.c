@@ -54,7 +54,7 @@ typedef struct TheoraDecoder
 
 static int FeedMoreOggData(const int fd, ogg_sync_state *sync)
 {
-    long buflen = 4096;  // !!! FIXME: tweak this?
+    long buflen = 4096;
     char *buffer = ogg_sync_buffer(sync, buflen);
     if (buffer == NULL)
         return -1;
@@ -231,7 +231,7 @@ static void WorkerThread(TheoraDecoder *ctx)
 
         // Try to read as much audio as we can at once. We limit the outer
         //  loop to one video frame and as much audio as we can eat.
-        while (!ctx->halt && vpackets && !need_pages)
+        while (!ctx->halt && vpackets)
         {
             float **pcm = NULL;
             const int frames = vorbis_synthesis_pcmout(&vdsp, &pcm);
@@ -285,7 +285,7 @@ printf("Decoded %d frames of audio.\n", (int) frames);
             {
                 // try to feed another packet to the Vorbis stream...
                 if (ogg_stream_packetout(&vstream, &packet) <= 0)
-                    need_pages = 1;  // stream needs another page.
+                    break;  // we'll get more pages when the video catches up.
                 else
                 {
                     if (vorbis_synthesis(&vblock, &packet) == 0)
