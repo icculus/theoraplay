@@ -321,6 +321,7 @@ static void WorkerThread(TheoraDecoder *ctx)
                         YuvVideoItem *item = (YuvVideoItem *) malloc(sizeof (YuvVideoItem));
                         if (item == NULL) goto cleanup;
                         item->playms = (fps == 0) ? 0.0 : (unsigned long) ((((double) videoframes) / fps) * 1000.0);
+                        item->fps = fps;
                         item->width = w;
                         item->height = h;
                         item->yuv = (unsigned char *) malloc(w * h * 2);

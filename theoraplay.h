@@ -18,6 +18,7 @@ typedef struct THEORAPLAY_Decoder THEORAPLAY_Decoder;
 typedef struct THEORAPLAY_YuvVideoItem
 {
     unsigned int playms;
+    double fps;
     unsigned int width;
     unsigned int height;
     unsigned char *yuv;

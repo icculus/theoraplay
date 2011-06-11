@@ -97,6 +97,7 @@ static void playfile(const char *fname)
     SDL_Surface *screen = NULL;
     SDL_Overlay *overlay = NULL;
     SDL_Event event;
+    Uint32 framems = 0;
     int initfailed = 0;
     int quit = 0;
 
@@ -133,6 +134,7 @@ static void playfile(const char *fname)
     // Set the video mode as soon as we know what it should be.
     if (video)
     {
+        framems = (video->fps == 0.0) ? 0 : ((Uint32) (1000.0 / video->fps));
         screen = SDL_SetVideoMode(video->width, video->height, 0, 0);
         if (!screen)
             fprintf(stderr, "SDL_SetVideoMode() failed: %s\n", SDL_GetError());
@@ -181,7 +183,10 @@ static void playfile(const char *fname)
         if (video && (video->playms <= now))
         {
             //printf("Play video frame (%u ms)!\n", video->playms);
-            if (SDL_LockYUVOverlay(overlay) == -1)
+            if ( framems && ((now - video->playms) >= framems) )
+                ; // do nothing, skip this frame to catch up.
+
+            else if (SDL_LockYUVOverlay(overlay) == -1)
             {
                 static int warned = 0;
                 if (!warned)
