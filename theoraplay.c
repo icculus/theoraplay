@@ -266,7 +266,7 @@ static void WorkerThread(TheoraDecoder *ctx)
                 vorbis_synthesis_read(&vdsp, frames);  // we ate everything.
                 audioframes += frames;
 
-printf("Decoded %d frames of audio.\n", (int) frames);
+                //printf("Decoded %d frames of audio.\n", (int) frames);
                 pthread_mutex_lock(&ctx->lock);
                 if (ctx->audiolisttail)
                 {
@@ -340,7 +340,7 @@ printf("Decoded %d frames of audio.\n", (int) frames);
                         for (i = 0; i < (h / 2); i++, yuv += w/2)
                             memcpy(yuv, ycbcr[1].data + uvoff + ycbcr[1].stride * i, w / 2);
 
-                        printf("Decoded another video frame.\n");
+                        //printf("Decoded another video frame.\n");
                         pthread_mutex_lock(&ctx->lock);
                         if (ctx->videolisttail)
                         {
@@ -381,7 +381,7 @@ printf("Decoded %d frames of audio.\n", (int) frames);
         if (saw_video_frame)
         {
             int go_on = !ctx->halt;
-            printf("Sleeping.\n");
+            //printf("Sleeping.\n");
             while (go_on)
             {
                 // !!! FIXME: This is stupid. I should use a semaphore for this.
@@ -391,7 +391,7 @@ printf("Decoded %d frames of audio.\n", (int) frames);
                 if (go_on)
                     usleep(10000);
             } // while
-            printf("Awake!\n");
+            //printf("Awake!\n");
         } // if
     } // while
 
@@ -419,7 +419,7 @@ static void *WorkerThreadEntry(void *_this)
 {
     TheoraDecoder *ctx = (TheoraDecoder *) _this;
     WorkerThread(ctx);
-    printf("Worker thread is done.\n");
+    //printf("Worker thread is done.\n");
     return NULL;
 } // WorkerThreadEntry
 
