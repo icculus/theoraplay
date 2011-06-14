@@ -462,6 +462,8 @@ THEORAPLAY_Decoder *THEORAPLAY_startDecode(const char *fname,
 void THEORAPLAY_stopDecode(THEORAPLAY_Decoder *decoder)
 {
     TheoraDecoder *ctx = (TheoraDecoder *) decoder;
+    if (!ctx)
+        return;
 
     if (ctx->thread_created)
     {
