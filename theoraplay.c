@@ -24,16 +24,18 @@
 #include "theora/theoradec.h"
 #include "vorbis/codec.h"
 
+#define THEORAPLAY_INTERNAL 1
+
 typedef THEORAPLAY_YuvVideoItem YuvVideoItem;
 typedef THEORAPLAY_PcmAudioItem PcmAudioItem;
 
-// !!! FIXME: these all count on the colorspace being TH_CS_ITU_REC_470M
-// !!! FIXME:  and the pixel format being TH_PF_420.
+// !!! FIXME: these all count on the pixel format being TH_PF_420 for now.
+
 typedef unsigned char *(*ConvertVideoFrameFn)(const th_info *tinfo,
                                               const th_ycbcr_buffer ycbcr);
 
-static unsigned char *ConvertVideoFrameYV12(const th_info *tinfo,
-                                            const th_ycbcr_buffer ycbcr)
+static unsigned char *ConvertVideoFrame420ToYV12(const th_info *tinfo,
+                                                 const th_ycbcr_buffer ycbcr)
 {
     int i;
     const int w = tinfo->pic_width;
@@ -53,121 +55,22 @@ static unsigned char *ConvertVideoFrameYV12(const th_info *tinfo,
     } // if
 
     return yuv;
-} // ConvertVideoFrameYV12
-
-static unsigned char *ConvertVideoFrameRGB(const th_info *tinfo,
-                                           const th_ycbcr_buffer ycbcr)
-{
-    const int w = tinfo->pic_width;
-    const int h = tinfo->pic_height;
-    unsigned char *rgb = (unsigned char *) malloc(w * h * 4);
-    if (rgb)
-    {
-        unsigned char *dst = rgb;
-        const int ystride = ycbcr[0].stride;
-        const int cbstride = ycbcr[1].stride;
-        const int crstride = ycbcr[2].stride;
-        const int yoff = (tinfo->pic_x & ~1) + ystride * (tinfo->pic_y & ~1);
-        const int cboff = (tinfo->pic_x / 2) + (cbstride) * (tinfo->pic_y / 2);
-        const unsigned char *py = ycbcr[0].data + yoff;
-        const unsigned char *pcb = ycbcr[1].data + cboff;
-        const unsigned char *pcr = ycbcr[2].data + cboff;
-        int posx, posy;
-
-        for (posy = 0; posy < h; posy++)
-        {
-            for (posx = 0; posx < w; posx++)
-            {
-                // http://www.theora.org/doc/Theora.pdf, 1.1 spec, chapter 4.2 (Y'CbCr -> Y'PbPr -> R'G'B')
-                // These constants are for NTSC. They are different for PAL/SECAM.
-                const float yoffset = 16.0f;
-                const float yexcursion = 219.0f;
-                const float cboffset = 128.0f;
-                const float cbexcursion = 224.0f;
-                const float croffset = 128.0f;
-                const float crexcursion = 224.0f;
-                const float kr = 0.299f;
-                const float kb = 0.114f;
-
-                const float y = (((float) py[posx]) - yoffset) / yexcursion;
-                const float pb = (((float) pcb[posx / 2]) - cboffset) / cbexcursion;
-                const float pr = (((float) pcr[posx / 2]) - croffset) / crexcursion;
-                const float r = (y + (2.0f * (1.0f - kr) * pr)) * 255.0f;
-                const float g = (y - ((2.0f * (((1.0f - kb) * kb) / ((1.0f - kb) - kr))) * pb) - ((2.0f * (((1.0f - kr) * kr) / ((1.0f - kb) - kr))) * pr)) * 255.0f;
-                const float b = (y + (2.0f * (1.0f - kb) * pb)) * 255.0f;
-
-                *(dst++) = (unsigned char) ((r < 0.0f) ? 0.0f : (r > 255.0f) ? 255.0f : r);
-                *(dst++) = (unsigned char) ((g < 0.0f) ? 0.0f : (g > 255.0f) ? 255.0f : g);
-                *(dst++) = (unsigned char) ((b < 0.0f) ? 0.0f : (b > 255.0f) ? 255.0f : b);
-            } // for
-
-            // adjust to the start of the next line.
-            py += ystride;
-            pcb += cbstride * (posy % 2);
-            pcr += crstride * (posy % 2);
-        } // for
-    } // if
-
-    return rgb;
-} // ConvertVideoFrameRGB
+} // ConvertVideoFrame420ToYV12
 
 
-static unsigned char *ConvertVideoFrameRGBA(const th_info *tinfo,
-                                            const th_ycbcr_buffer ycbcr)
-{
-    const int w = tinfo->pic_width;
-    const int h = tinfo->pic_height;
-    unsigned char *rgba = (unsigned char *) malloc(w * h * 4);
-    if (rgba)
-    {
-        unsigned char *dst = rgba;
-        const int ystride = ycbcr[0].stride;
-        const int cbstride = ycbcr[1].stride;
-        const int crstride = ycbcr[2].stride;
-        const int yoff = (tinfo->pic_x & ~1) + ystride * (tinfo->pic_y & ~1);
-        const int cboff = (tinfo->pic_x / 2) + (cbstride) * (tinfo->pic_y / 2);
-        const unsigned char *py = ycbcr[0].data + yoff;
-        const unsigned char *pcb = ycbcr[1].data + cboff;
-        const unsigned char *pcr = ycbcr[2].data + cboff;
-        int posx, posy;
+// RGB
+#define THEORAPLAY_CVT_FNNAME_420 ConvertVideoFrame420ToRGB
+#define THEORAPLAY_CVT_RGB_ALPHA 0
+#include "theoraplay_cvtrgb.h"
+#undef THEORAPLAY_CVT_RGB_ALPHA
+#undef THEORAPLAY_CVT_FNNAME_420
 
-        for (posy = 0; posy < h; posy++)
-        {
-            for (posx = 0; posx < w; posx++)
-            {
-                // http://www.theora.org/doc/Theora.pdf, 1.1 spec, chapter 4.2 (Y'CbCr -> Y'PbPr -> R'G'B')
-                // These constants are for NTSC. They are different for PAL/SECAM.
-                const float yoffset = 16.0f;
-                const float yexcursion = 219.0f;
-                const float cboffset = 128.0f;
-                const float cbexcursion = 224.0f;
-                const float croffset = 128.0f;
-                const float crexcursion = 224.0f;
-                const float kr = 0.299f;
-                const float kb = 0.114f;
-
-                const float y = (((float) py[posx]) - yoffset) / yexcursion;
-                const float pb = (((float) pcb[posx / 2]) - cboffset) / cbexcursion;
-                const float pr = (((float) pcr[posx / 2]) - croffset) / crexcursion;
-                const float r = (y + (2.0f * (1.0f - kr) * pr)) * 255.0f;
-                const float g = (y - ((2.0f * (((1.0f - kb) * kb) / ((1.0f - kb) - kr))) * pb) - ((2.0f * (((1.0f - kr) * kr) / ((1.0f - kb) - kr))) * pr)) * 255.0f;
-                const float b = (y + (2.0f * (1.0f - kb) * pb)) * 255.0f;
-
-                *(dst++) = (unsigned char) ((r < 0.0f) ? 0.0f : (r > 255.0f) ? 255.0f : r);
-                *(dst++) = (unsigned char) ((g < 0.0f) ? 0.0f : (g > 255.0f) ? 255.0f : g);
-                *(dst++) = (unsigned char) ((b < 0.0f) ? 0.0f : (b > 255.0f) ? 255.0f : b);
-                *(dst++) = 0xFF;  // full alpha.
-            } // for
-
-            // adjust to the start of the next line.
-            py += ystride;
-            pcb += cbstride * (posy % 2);
-            pcr += crstride * (posy % 2);
-        } // for
-    } // if
-
-    return rgba;
-} // ConvertVideoFrameRGBA
+// RGBA
+#define THEORAPLAY_CVT_FNNAME_420 ConvertVideoFrame420ToRGBA
+#define THEORAPLAY_CVT_RGB_ALPHA 1
+#include "theoraplay_cvtrgb.h"
+#undef THEORAPLAY_CVT_RGB_ALPHA
+#undef THEORAPLAY_CVT_FNNAME_420
 
 
 typedef struct TheoraDecoder
@@ -335,7 +238,8 @@ static void WorkerThread(TheoraDecoder *ctx)
 
         // We treat "unspecified" as NTSC. *shrug*
         if ( (tinfo.colorspace != TH_CS_UNSPECIFIED) &&
-             (tinfo.colorspace != TH_CS_ITU_REC_470M) )
+             (tinfo.colorspace != TH_CS_ITU_REC_470M) &&
+             (tinfo.colorspace != TH_CS_ITU_REC_470BG) )
         {
             assert(0 && "Unsupported colorspace.");  // !!! FIXME
             goto cleanup;
@@ -573,7 +477,8 @@ THEORAPLAY_Decoder *THEORAPLAY_startDecode(const char *fname,
 
     switch (vidfmt)
     {
-        #define VIDCVT(t) case THEORAPLAY_VIDFMT_##t: vidcvt = ConvertVideoFrame##t; break;
+        // !!! FIXME: current expects TH_PF_420.
+        #define VIDCVT(t) case THEORAPLAY_VIDFMT_##t: vidcvt = ConvertVideoFrame420To##t; break;
         VIDCVT(YV12)
         VIDCVT(RGB)
         VIDCVT(RGBA)
