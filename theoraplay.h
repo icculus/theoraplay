@@ -23,7 +23,7 @@ typedef enum THEORAPLAY_VideoFormat
     THEORAPLAY_VIDFMT_RGBA   /* 32 bits packed pixel RGBA (full alpha). */
 } THEORAPLAY_VideoFormat;
 
-typedef struct THEORAPLAY_YuvVideoItem
+typedef struct THEORAPLAY_VideoFrame
 {
     unsigned int playms;
     double fps;
@@ -31,18 +31,18 @@ typedef struct THEORAPLAY_YuvVideoItem
     unsigned int height;
     THEORAPLAY_VideoFormat format;
     unsigned char *pixels;
-    struct THEORAPLAY_YuvVideoItem *next;
-} THEORAPLAY_YuvVideoItem;
+    struct THEORAPLAY_VideoFrame *next;
+} THEORAPLAY_VideoFrame;
 
-typedef struct THEORAPLAY_PcmAudioItem
+typedef struct THEORAPLAY_AudioPacket
 {
     unsigned int playms;  // playback start time in milliseconds.
     int channels;
     int freq;
     int frames;
     float *samples;  // frames * channels float32 samples.
-    struct THEORAPLAY_PcmAudioItem *next;
-} THEORAPLAY_PcmAudioItem;
+    struct THEORAPLAY_AudioPacket *next;
+} THEORAPLAY_AudioPacket;
 
 THEORAPLAY_Decoder *THEORAPLAY_startDecode(const char *fname,
                                            const unsigned int maxframes,
@@ -51,11 +51,11 @@ void THEORAPLAY_stopDecode(THEORAPLAY_Decoder *decoder);
 int THEORAPLAY_isDecoding(THEORAPLAY_Decoder *decoder);
 int THEORAPLAY_decodingError(THEORAPLAY_Decoder *decoder);
 
-const THEORAPLAY_PcmAudioItem *THEORAPLAY_getAudio(THEORAPLAY_Decoder *decoder);
-void THEORAPLAY_freeAudio(const THEORAPLAY_PcmAudioItem *item);
+const THEORAPLAY_AudioPacket *THEORAPLAY_getAudio(THEORAPLAY_Decoder *decoder);
+void THEORAPLAY_freeAudio(const THEORAPLAY_AudioPacket *item);
 
-const THEORAPLAY_YuvVideoItem *THEORAPLAY_getVideo(THEORAPLAY_Decoder *decoder);
-void THEORAPLAY_freeVideo(const THEORAPLAY_YuvVideoItem *item);
+const THEORAPLAY_VideoFrame *THEORAPLAY_getVideo(THEORAPLAY_Decoder *decoder);
+void THEORAPLAY_freeVideo(const THEORAPLAY_VideoFrame *item);
 
 #ifdef __cplusplus
 }

@@ -14,8 +14,8 @@
 static void dofile(const char *fname, const THEORAPLAY_VideoFormat vidfmt)
 {
     THEORAPLAY_Decoder *decoder = NULL;
-    const THEORAPLAY_YuvVideoItem *video = NULL;
-    const THEORAPLAY_PcmAudioItem *audio = NULL;
+    const THEORAPLAY_VideoFrame *video = NULL;
+    const THEORAPLAY_AudioPacket *audio = NULL;
 
     printf("Trying file '%s' ...\n", fname);
     decoder = THEORAPLAY_startDecode(fname, 20, vidfmt);

@@ -18,7 +18,7 @@ static Uint32 baseticks = 0;
 
 typedef struct AudioQueue
 {
-    const THEORAPLAY_PcmAudioItem *audio;
+    const THEORAPLAY_AudioPacket *audio;
     int offset;
     struct AudioQueue *next;
 } AudioQueue;
@@ -67,7 +67,7 @@ static void SDLCALL audio_callback(void *userdata, Uint8 *stream, int len)
 } // audio_callback
 
 
-static void queue_audio(const THEORAPLAY_PcmAudioItem *audio)
+static void queue_audio(const THEORAPLAY_AudioPacket *audio)
 {
     AudioQueue *item = (AudioQueue *) malloc(sizeof (AudioQueue));
     if (!item)
@@ -98,8 +98,8 @@ static int need_overlay(const THEORAPLAY_VideoFormat vidfmt)
 
 static void setcaption(const char *fname,
                        const THEORAPLAY_VideoFormat vidfmt,
-                       const THEORAPLAY_YuvVideoItem *video,
-                       const THEORAPLAY_PcmAudioItem *audio)
+                       const THEORAPLAY_VideoFrame *video,
+                       const THEORAPLAY_AudioPacket *audio)
 {
     char buf[1024];
     const char *fmtstr = "???";
@@ -142,8 +142,8 @@ static void setcaption(const char *fname,
 static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt)
 {
     THEORAPLAY_Decoder *decoder = NULL;
-    const THEORAPLAY_YuvVideoItem *video = NULL;
-    const THEORAPLAY_PcmAudioItem *audio = NULL;
+    const THEORAPLAY_VideoFrame *video = NULL;
+    const THEORAPLAY_AudioPacket *audio = NULL;
     SDL_Surface *screen = NULL;
     SDL_Surface *shadow = NULL;
     SDL_Overlay *overlay = NULL;
@@ -255,7 +255,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt)
                 //  in case we catch up to a series of dupe frames, which
                 //  means we'd have to draw that final frame and then wait for
                 //  more.
-                const THEORAPLAY_YuvVideoItem *last = video;
+                const THEORAPLAY_VideoFrame *last = video;
                 while ((video = THEORAPLAY_getVideo(decoder)) != NULL)
                 {
                     THEORAPLAY_freeVideo(last);

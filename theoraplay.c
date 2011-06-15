@@ -26,8 +26,8 @@
 
 #define THEORAPLAY_INTERNAL 1
 
-typedef THEORAPLAY_YuvVideoItem YuvVideoItem;
-typedef THEORAPLAY_PcmAudioItem PcmAudioItem;
+typedef THEORAPLAY_VideoFrame VideoFrame;
+typedef THEORAPLAY_AudioPacket AudioPacket;
 
 // !!! FIXME: these all count on the pixel format being TH_PF_420 for now.
 
@@ -92,11 +92,11 @@ typedef struct TheoraDecoder
     THEORAPLAY_VideoFormat vidfmt;
     ConvertVideoFrameFn vidcvt;
 
-    YuvVideoItem *videolist;
-    YuvVideoItem *videolisttail;
+    VideoFrame *videolist;
+    VideoFrame *videolisttail;
 
-    PcmAudioItem *audiolist;
-    PcmAudioItem *audiolisttail;
+    AudioPacket *audiolist;
+    AudioPacket *audiolisttail;
 } TheoraDecoder;
 
 
@@ -297,7 +297,7 @@ static void WorkerThread(TheoraDecoder *ctx)
                 const int channels = vinfo.channels;
                 int chanidx, frameidx;
                 float *samples;
-                PcmAudioItem *item = (PcmAudioItem *) malloc(sizeof (PcmAudioItem));
+                AudioPacket *item = (AudioPacket *) malloc(sizeof (AudioPacket));
                 if (item == NULL) goto cleanup;
                 item->playms = (unsigned long) ((((double) audioframes) / ((double) vinfo.rate)) * 1000.0);
                 item->channels = channels;
@@ -369,7 +369,7 @@ static void WorkerThread(TheoraDecoder *ctx)
                     th_ycbcr_buffer ycbcr;
                     if (th_decode_ycbcr_out(tdec, ycbcr) == 0)
                     {
-                        YuvVideoItem *item = (YuvVideoItem *) malloc(sizeof (YuvVideoItem));
+                        VideoFrame *item = (VideoFrame *) malloc(sizeof (VideoFrame));
                         if (item == NULL) goto cleanup;
                         item->playms = (fps == 0) ? 0 : (unsigned int) ((((double) videoframes) / fps) * 1000.0);
                         item->fps = fps;
@@ -533,19 +533,19 @@ void THEORAPLAY_stopDecode(THEORAPLAY_Decoder *decoder)
         pthread_mutex_destroy(&ctx->lock);
     } // if
 
-    YuvVideoItem *videolist = ctx->videolist;
+    VideoFrame *videolist = ctx->videolist;
     while (videolist)
     {
-        YuvVideoItem *next = videolist->next;
+        VideoFrame *next = videolist->next;
         free(videolist->pixels);
         free(videolist);
         videolist = next;
     } // while
 
-    PcmAudioItem *audiolist = ctx->audiolist;
+    AudioPacket *audiolist = ctx->audiolist;
     while (audiolist)
     {
-        PcmAudioItem *next = audiolist->next;
+        AudioPacket *next = audiolist->next;
         free(audiolist->samples);
         free(audiolist);
         audiolist = next;
@@ -570,10 +570,10 @@ int THEORAPLAY_decodingError(THEORAPLAY_Decoder *decoder)
 } // THEORAPLAY_decodingError
 
 
-const PcmAudioItem *THEORAPLAY_getAudio(THEORAPLAY_Decoder *decoder)
+const THEORAPLAY_AudioPacket *THEORAPLAY_getAudio(THEORAPLAY_Decoder *decoder)
 {
     TheoraDecoder *ctx = (TheoraDecoder *) decoder;
-    PcmAudioItem *retval;
+    AudioPacket *retval;
 
     pthread_mutex_lock(&ctx->lock);
     retval = ctx->audiolist;
@@ -590,9 +590,9 @@ const PcmAudioItem *THEORAPLAY_getAudio(THEORAPLAY_Decoder *decoder)
 } // THEORAPLAY_getAudio
 
 
-void THEORAPLAY_freeAudio(const PcmAudioItem *_item)
+void THEORAPLAY_freeAudio(const THEORAPLAY_AudioPacket *_item)
 {
-    PcmAudioItem *item = (PcmAudioItem *) _item;
+    THEORAPLAY_AudioPacket *item = (THEORAPLAY_AudioPacket *) _item;
     if (item != NULL)
     {
         assert(item->next == NULL);
@@ -602,10 +602,10 @@ void THEORAPLAY_freeAudio(const PcmAudioItem *_item)
 } // THEORAPLAY_freeAudio
 
 
-const YuvVideoItem *THEORAPLAY_getVideo(THEORAPLAY_Decoder *decoder)
+const THEORAPLAY_VideoFrame *THEORAPLAY_getVideo(THEORAPLAY_Decoder *decoder)
 {
     TheoraDecoder *ctx = (TheoraDecoder *) decoder;
-    YuvVideoItem *retval;
+    VideoFrame *retval;
 
     pthread_mutex_lock(&ctx->lock);
     retval = ctx->videolist;
@@ -624,9 +624,9 @@ const YuvVideoItem *THEORAPLAY_getVideo(THEORAPLAY_Decoder *decoder)
 } // THEORAPLAY_getVideo
 
 
-void THEORAPLAY_freeVideo(const YuvVideoItem *_item)
+void THEORAPLAY_freeVideo(const THEORAPLAY_VideoFrame *_item)
 {
-    YuvVideoItem *item = (YuvVideoItem *) _item;
+    THEORAPLAY_VideoFrame *item = (THEORAPLAY_VideoFrame *) _item;
     if (item != NULL)
     {
         assert(item->next == NULL);
