@@ -15,13 +15,22 @@ extern "C" {
 
 typedef struct THEORAPLAY_Decoder THEORAPLAY_Decoder;
 
+/* YV12 is YCrCb, not YCbCr; that's what SDL uses for YV12 overlays. */
+typedef enum THEORAPLAY_VideoFormat
+{
+    THEORAPLAY_VIDFMT_YV12,  /* NTSC colorspace, planar YCrCb 4:2:0 */
+    THEORAPLAY_VIDFMT_RGB,   /* 24 bits packed pixel RGB */
+    THEORAPLAY_VIDFMT_RGBA   /* 32 bits packed pixel RGBA (full alpha). */
+} THEORAPLAY_VideoFormat;
+
 typedef struct THEORAPLAY_YuvVideoItem
 {
     unsigned int playms;
     double fps;
     unsigned int width;
     unsigned int height;
-    unsigned char *yuv;
+    THEORAPLAY_VideoFormat format;
+    unsigned char *pixels;
     struct THEORAPLAY_YuvVideoItem *next;
 } THEORAPLAY_YuvVideoItem;
 
@@ -36,7 +45,8 @@ typedef struct THEORAPLAY_PcmAudioItem
 } THEORAPLAY_PcmAudioItem;
 
 THEORAPLAY_Decoder *THEORAPLAY_startDecode(const char *fname,
-                                           const unsigned int maxframes);
+                                           const unsigned int maxframes,
+                                           THEORAPLAY_VideoFormat vidfmt);
 void THEORAPLAY_stopDecode(THEORAPLAY_Decoder *decoder);
 int THEORAPLAY_isDecoding(THEORAPLAY_Decoder *decoder);
 int THEORAPLAY_decodingError(THEORAPLAY_Decoder *decoder);

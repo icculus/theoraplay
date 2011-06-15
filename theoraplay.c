@@ -27,6 +27,149 @@
 typedef THEORAPLAY_YuvVideoItem YuvVideoItem;
 typedef THEORAPLAY_PcmAudioItem PcmAudioItem;
 
+// !!! FIXME: these all count on the colorspace being TH_CS_ITU_REC_470M
+// !!! FIXME:  and the pixel format being TH_PF_420.
+typedef unsigned char *(*ConvertVideoFrameFn)(const th_info *tinfo,
+                                              const th_ycbcr_buffer ycbcr);
+
+static unsigned char *ConvertVideoFrameYV12(const th_info *tinfo,
+                                            const th_ycbcr_buffer ycbcr)
+{
+    int i;
+    const int w = tinfo->pic_width;
+    const int h = tinfo->pic_height;
+    const int yoff = (tinfo->pic_x & ~1) + ycbcr[0].stride * (tinfo->pic_y & ~1);
+    const int uvoff = (tinfo->pic_x / 2) + (ycbcr[1].stride) * (tinfo->pic_y / 2);
+    unsigned char *yuv = (unsigned char *) malloc(w * h * 2);
+    if (yuv)
+    {
+        unsigned char *dst = yuv;
+        for (i = 0; i < h; i++, dst += w)
+            memcpy(dst, ycbcr[0].data + yoff + ycbcr[0].stride * i, w);
+        for (i = 0; i < (h / 2); i++, dst += w/2)
+            memcpy(dst, ycbcr[2].data + uvoff + ycbcr[2].stride * i, w / 2);
+        for (i = 0; i < (h / 2); i++, dst += w/2)
+            memcpy(dst, ycbcr[1].data + uvoff + ycbcr[1].stride * i, w / 2);
+    } // if
+
+    return yuv;
+} // ConvertVideoFrameYV12
+
+static unsigned char *ConvertVideoFrameRGB(const th_info *tinfo,
+                                           const th_ycbcr_buffer ycbcr)
+{
+    const int w = tinfo->pic_width;
+    const int h = tinfo->pic_height;
+    unsigned char *rgb = (unsigned char *) malloc(w * h * 4);
+    if (rgb)
+    {
+        unsigned char *dst = rgb;
+        const int ystride = ycbcr[0].stride;
+        const int cbstride = ycbcr[1].stride;
+        const int crstride = ycbcr[2].stride;
+        const int yoff = (tinfo->pic_x & ~1) + ystride * (tinfo->pic_y & ~1);
+        const int cboff = (tinfo->pic_x / 2) + (cbstride) * (tinfo->pic_y / 2);
+        const unsigned char *py = ycbcr[0].data + yoff;
+        const unsigned char *pcb = ycbcr[1].data + cboff;
+        const unsigned char *pcr = ycbcr[2].data + cboff;
+        int posx, posy;
+
+        for (posy = 0; posy < h; posy++)
+        {
+            for (posx = 0; posx < w; posx++)
+            {
+                // http://www.theora.org/doc/Theora.pdf, 1.1 spec, chapter 4.2 (Y'CbCr -> Y'PbPr -> R'G'B')
+                // These constants are for NTSC. They are different for PAL/SECAM.
+                const float yoffset = 16.0f;
+                const float yexcursion = 219.0f;
+                const float cboffset = 128.0f;
+                const float cbexcursion = 224.0f;
+                const float croffset = 128.0f;
+                const float crexcursion = 224.0f;
+                const float kr = 0.299f;
+                const float kb = 0.114f;
+
+                const float y = (((float) py[posx]) - yoffset) / yexcursion;
+                const float pb = (((float) pcb[posx / 2]) - cboffset) / cbexcursion;
+                const float pr = (((float) pcr[posx / 2]) - croffset) / crexcursion;
+                const float r = (y + (2.0f * (1.0f - kr) * pr)) * 255.0f;
+                const float g = (y - ((2.0f * (((1.0f - kb) * kb) / ((1.0f - kb) - kr))) * pb) - ((2.0f * (((1.0f - kr) * kr) / ((1.0f - kb) - kr))) * pr)) * 255.0f;
+                const float b = (y + (2.0f * (1.0f - kb) * pb)) * 255.0f;
+
+                *(dst++) = (unsigned char) ((r < 0.0f) ? 0.0f : (r > 255.0f) ? 255.0f : r);
+                *(dst++) = (unsigned char) ((g < 0.0f) ? 0.0f : (g > 255.0f) ? 255.0f : g);
+                *(dst++) = (unsigned char) ((b < 0.0f) ? 0.0f : (b > 255.0f) ? 255.0f : b);
+            } // for
+
+            // adjust to the start of the next line.
+            py += ystride;
+            pcb += cbstride * (posy % 2);
+            pcr += crstride * (posy % 2);
+        } // for
+    } // if
+
+    return rgb;
+} // ConvertVideoFrameRGB
+
+
+static unsigned char *ConvertVideoFrameRGBA(const th_info *tinfo,
+                                            const th_ycbcr_buffer ycbcr)
+{
+    const int w = tinfo->pic_width;
+    const int h = tinfo->pic_height;
+    unsigned char *rgba = (unsigned char *) malloc(w * h * 4);
+    if (rgba)
+    {
+        unsigned char *dst = rgba;
+        const int ystride = ycbcr[0].stride;
+        const int cbstride = ycbcr[1].stride;
+        const int crstride = ycbcr[2].stride;
+        const int yoff = (tinfo->pic_x & ~1) + ystride * (tinfo->pic_y & ~1);
+        const int cboff = (tinfo->pic_x / 2) + (cbstride) * (tinfo->pic_y / 2);
+        const unsigned char *py = ycbcr[0].data + yoff;
+        const unsigned char *pcb = ycbcr[1].data + cboff;
+        const unsigned char *pcr = ycbcr[2].data + cboff;
+        int posx, posy;
+
+        for (posy = 0; posy < h; posy++)
+        {
+            for (posx = 0; posx < w; posx++)
+            {
+                // http://www.theora.org/doc/Theora.pdf, 1.1 spec, chapter 4.2 (Y'CbCr -> Y'PbPr -> R'G'B')
+                // These constants are for NTSC. They are different for PAL/SECAM.
+                const float yoffset = 16.0f;
+                const float yexcursion = 219.0f;
+                const float cboffset = 128.0f;
+                const float cbexcursion = 224.0f;
+                const float croffset = 128.0f;
+                const float crexcursion = 224.0f;
+                const float kr = 0.299f;
+                const float kb = 0.114f;
+
+                const float y = (((float) py[posx]) - yoffset) / yexcursion;
+                const float pb = (((float) pcb[posx / 2]) - cboffset) / cbexcursion;
+                const float pr = (((float) pcr[posx / 2]) - croffset) / crexcursion;
+                const float r = (y + (2.0f * (1.0f - kr) * pr)) * 255.0f;
+                const float g = (y - ((2.0f * (((1.0f - kb) * kb) / ((1.0f - kb) - kr))) * pb) - ((2.0f * (((1.0f - kr) * kr) / ((1.0f - kb) - kr))) * pr)) * 255.0f;
+                const float b = (y + (2.0f * (1.0f - kb) * pb)) * 255.0f;
+
+                *(dst++) = (unsigned char) ((r < 0.0f) ? 0.0f : (r > 255.0f) ? 255.0f : r);
+                *(dst++) = (unsigned char) ((g < 0.0f) ? 0.0f : (g > 255.0f) ? 255.0f : g);
+                *(dst++) = (unsigned char) ((b < 0.0f) ? 0.0f : (b > 255.0f) ? 255.0f : b);
+                *(dst++) = 0xFF;  // full alpha.
+            } // for
+
+            // adjust to the start of the next line.
+            py += ystride;
+            pcb += cbstride * (posy % 2);
+            pcr += crstride * (posy % 2);
+        } // for
+    } // if
+
+    return rgba;
+} // ConvertVideoFrameRGBA
+
+
 typedef struct TheoraDecoder
 {
     // Thread wrangling...
@@ -43,6 +186,8 @@ typedef struct TheoraDecoder
 
     // API state...
     unsigned int maxframes;  // Max video frames to buffer.
+    THEORAPLAY_VideoFormat vidfmt;
+    ConvertVideoFrameFn vidcvt;
 
     YuvVideoItem *videolist;
     YuvVideoItem *videolisttail;
@@ -188,7 +333,14 @@ static void WorkerThread(TheoraDecoder *ctx)
         if ((tinfo.frame_width > 99999) || (tinfo.frame_height > 99999))
             goto cleanup;
 
-        //if (tinfo.colorspace != TH_CS_ITU_REC_470M) { assert(0); goto cleanup; } // !!! FIXME
+        // We treat "unspecified" as NTSC. *shrug*
+        if ( (tinfo.colorspace != TH_CS_UNSPECIFIED) &&
+             (tinfo.colorspace != TH_CS_ITU_REC_470M) )
+        {
+            assert(0 && "Unsupported colorspace.");  // !!! FIXME
+            goto cleanup;
+        } // if
+
         if (tinfo.pixel_fmt != TH_PF_420) { assert(0); goto cleanup; } // !!! FIXME
 
         if (tinfo.fps_denominator != 0)
@@ -312,34 +464,21 @@ static void WorkerThread(TheoraDecoder *ctx)
                     th_ycbcr_buffer ycbcr;
                     if (th_decode_ycbcr_out(tdec, ycbcr) == 0)
                     {
-                        int i;
-                        const int w = tinfo.pic_width;
-                        const int h = tinfo.pic_height;
-                        const int yoff = (tinfo.pic_x & ~1) + ycbcr[0].stride * (tinfo.pic_y & ~1);
-                        const int uvoff= (tinfo.pic_x / 2) + (ycbcr[1].stride) * (tinfo.pic_y / 2);
-                        unsigned char *yuv;
                         YuvVideoItem *item = (YuvVideoItem *) malloc(sizeof (YuvVideoItem));
                         if (item == NULL) goto cleanup;
                         item->playms = (fps == 0) ? 0 : (unsigned int) ((((double) videoframes) / fps) * 1000.0);
                         item->fps = fps;
-                        item->width = w;
-                        item->height = h;
-                        item->yuv = (unsigned char *) malloc(w * h * 2);
+                        item->width = tinfo.pic_width;
+                        item->height = tinfo.pic_height;
+                        item->format = ctx->vidfmt;
+                        item->pixels = ctx->vidcvt(&tinfo, ycbcr);
                         item->next = NULL;
 
-                        if (item->yuv == NULL)
+                        if (item->pixels == NULL)
                         {
                             free(item);
                             goto cleanup;
                         } // if
-
-                        yuv = item->yuv;
-                        for (i = 0; i < h; i++, yuv += w)
-                            memcpy(yuv, ycbcr[0].data + yoff + ycbcr[0].stride * i, w);
-                        for (i = 0; i < (h / 2); i++, yuv += w/2)
-                            memcpy(yuv, ycbcr[2].data + uvoff + ycbcr[2].stride * i, w / 2);
-                        for (i = 0; i < (h / 2); i++, yuv += w/2)
-                            memcpy(yuv, ycbcr[1].data + uvoff + ycbcr[1].stride * i, w / 2);
 
                         //printf("Decoded another video frame.\n");
                         pthread_mutex_lock(&ctx->lock);
@@ -426,14 +565,30 @@ static void *WorkerThreadEntry(void *_this)
 
 
 THEORAPLAY_Decoder *THEORAPLAY_startDecode(const char *fname,
-                                           const unsigned int maxframes)
+                                           const unsigned int maxframes,
+                                           THEORAPLAY_VideoFormat vidfmt)
 {
-    TheoraDecoder *ctx = malloc(sizeof (TheoraDecoder));
+    TheoraDecoder *ctx = NULL;
+    ConvertVideoFrameFn vidcvt = NULL;
+
+    switch (vidfmt)
+    {
+        #define VIDCVT(t) case THEORAPLAY_VIDFMT_##t: vidcvt = ConvertVideoFrame##t; break;
+        VIDCVT(YV12)
+        VIDCVT(RGB)
+        VIDCVT(RGBA)
+        #undef VIDCVT
+        default: return NULL;  // invalid/unsupported format.
+    } // switch
+
+    ctx = malloc(sizeof (TheoraDecoder));
     if (ctx == NULL)
         return NULL;
 
     memset(ctx, '\0', sizeof (TheoraDecoder));
     ctx->maxframes = maxframes;
+    ctx->vidfmt = vidfmt;
+    ctx->vidcvt = vidcvt;
 
     ctx->fd = open(fname, O_RDONLY);
     if (ctx->fd != -1)
@@ -476,7 +631,7 @@ void THEORAPLAY_stopDecode(THEORAPLAY_Decoder *decoder)
     while (videolist)
     {
         YuvVideoItem *next = videolist->next;
-        free(videolist->yuv);
+        free(videolist->pixels);
         free(videolist);
         videolist = next;
     } // while
@@ -569,7 +724,7 @@ void THEORAPLAY_freeVideo(const YuvVideoItem *_item)
     if (item != NULL)
     {
         assert(item->next == NULL);
-        free(item->yuv);
+        free(item->pixels);
         free(item);
     } // if
 } // THEORAPLAY_freeVideo

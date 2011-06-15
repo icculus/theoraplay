@@ -9,6 +9,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <assert.h>
+
 #include "theoraplay.h"
 #include "SDL.h"
 
@@ -88,13 +90,62 @@ static void queue_audio(const THEORAPLAY_PcmAudioItem *audio)
 } // queue_audio
 
 
-static void playfile(const char *fname)
+static int need_overlay(const THEORAPLAY_VideoFormat vidfmt)
+{
+    return (vidfmt == THEORAPLAY_VIDFMT_YV12);
+} // need_overlay
+
+
+static void setcaption(const char *fname,
+                       const THEORAPLAY_VideoFormat vidfmt,
+                       const THEORAPLAY_YuvVideoItem *video,
+                       const THEORAPLAY_PcmAudioItem *audio)
+{
+    char buf[1024];
+    const char *fmtstr = "???";
+    const char *basefname = NULL;
+
+    if (!video)
+        return;  // no caption to set.
+
+    basefname = strrchr(fname, '/');
+    if (!basefname)
+        basefname = fname;
+    else
+        basefname++;
+
+    switch (vidfmt)
+    {
+        case THEORAPLAY_VIDFMT_RGB:  fmtstr = "RGB";  break;
+        case THEORAPLAY_VIDFMT_RGBA: fmtstr = "RGBA"; break;
+        case THEORAPLAY_VIDFMT_YV12: fmtstr = "YV12"; break;
+        default: assert(0 && "Unexpected video format!"); break;
+    } // switch
+
+    if (audio)
+    {
+        snprintf(buf, sizeof (buf), "%s (%ux%u, %.2gfps, %s, %uch, %uHz)",
+                 basefname, video->width, video->height, video->fps,
+                 fmtstr, audio->channels, audio->freq);
+    } // if
+    else
+    {
+        snprintf(buf, sizeof (buf), "%s (%ux%u, %ffps, %s, no audio)",
+                 basefname, video->width, video->height, video->fps,
+                 fmtstr);
+    } // else
+
+    SDL_WM_SetCaption(buf, basefname);
+} // setcaption
+
+
+static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt)
 {
     THEORAPLAY_Decoder *decoder = NULL;
     const THEORAPLAY_YuvVideoItem *video = NULL;
     const THEORAPLAY_PcmAudioItem *audio = NULL;
-    const char *basefname = NULL;
     SDL_Surface *screen = NULL;
+    SDL_Surface *shadow = NULL;
     SDL_Overlay *overlay = NULL;
     SDL_Event event;
     Uint32 framems = 0;
@@ -102,7 +153,7 @@ static void playfile(const char *fname)
     int quit = 0;
 
     printf("Trying file '%s' ...\n", fname);
-    decoder = THEORAPLAY_startDecode(fname, 20);
+    decoder = THEORAPLAY_startDecode(fname, 20, vidfmt);
     if (!decoder)
     {
         fprintf(stderr, "Failed to start decoding '%s'!\n", fname);
@@ -114,13 +165,6 @@ static void playfile(const char *fname)
         fprintf(stderr, "SDL_Init() failed: %s\n", SDL_GetError());
         return;
     } // if
-
-    basefname = strrchr(fname, '/');
-    if (!basefname)
-        basefname = fname;
-    else
-        basefname++;
-    SDL_WM_SetCaption(basefname, basefname);
 
     // wait until we have a video and audio packet, so we can set up hardware.
     // !!! FIXME: we need an API to decide if this file has only audio/video.
@@ -134,7 +178,9 @@ static void playfile(const char *fname)
     // Set the video mode as soon as we know what it should be.
     if (video)
     {
+        const int needoverlay = need_overlay(vidfmt);
         framems = (video->fps == 0.0) ? 0 : ((Uint32) (1000.0 / video->fps));
+        setcaption(fname, vidfmt, video, audio);
         screen = SDL_SetVideoMode(video->width, video->height, 0, 0);
         if (!screen)
             fprintf(stderr, "SDL_SetVideoMode() failed: %s\n", SDL_GetError());
@@ -144,14 +190,34 @@ static void playfile(const char *fname)
             SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0));
             SDL_Flip(screen);
 
-            overlay = SDL_CreateYUVOverlay(video->width, video->height,
-                                       SDL_YV12_OVERLAY, screen);
+            if (needoverlay)
+            {
+                overlay = SDL_CreateYUVOverlay(video->width, video->height,
+                                               SDL_YV12_OVERLAY, screen);
 
-            if (!overlay)
-                fprintf(stderr, "YUV Overlay failed: %s\n", SDL_GetError());
+                if (!overlay)
+                    fprintf(stderr, "YUV Overlay failed: %s\n", SDL_GetError());
+            } // if
+            else
+            {
+                const int alpha = (vidfmt == THEORAPLAY_VIDFMT_RGBA);
+                const int bits = 24 + (alpha * 8);
+                const Uint32 rmask = SDL_SwapLE32(0xFF0000FF);
+                const Uint32 gmask = SDL_SwapLE32(0x0000FF00);
+                const Uint32 bmask = SDL_SwapLE32(0x00FF0000);
+                const Uint32 amask = 0x00000000;
+                shadow = SDL_CreateRGBSurface(SDL_SWSURFACE,
+                                              video->width, video->height,
+                                              bits, rmask, gmask, bmask, amask);
+                if (!shadow)
+                    fprintf(stderr, "Shadow surface failed: %s\n", SDL_GetError());
+
+                assert(!shadow || !SDL_MUSTLOCK(shadow));
+                assert(!shadow || (shadow->pitch == (video->width * (bits/8))));
+            } // else
         } // else
 
-        initfailed = quit = (!screen || !overlay);
+        initfailed = quit = (!screen || (needoverlay ? !overlay : !shadow));
     } // if
 
     // Open the audio device as soon as we know what it should be.
@@ -212,6 +278,16 @@ static void playfile(const char *fname)
                 } // if
             } // if
 
+            else if (!overlay)  // not a YUV thing.
+            {
+                memcpy(shadow->pixels, video->pixels, shadow->h * shadow->pitch);
+                // shadow is a software surface, and is thus never "lost".
+                //  Keep trying if the screen surface is lost, though.
+                while (SDL_BlitSurface(shadow, NULL, screen, NULL) == -2)
+                    SDL_Delay(1000);
+                SDL_Flip(screen);
+            } // else if
+
             else if (SDL_LockYUVOverlay(overlay) == -1)
             {
                 static int warned = 0;
@@ -220,13 +296,14 @@ static void playfile(const char *fname)
                     warned = 1;
                     fprintf(stderr, "Couldn't lock YUV overlay: %s\n", SDL_GetError());
                 } // if
-            } // if
+            } // else if
+
             else
             {
                 SDL_Rect dstrect = { 0, 0, video->width, video->height };
                 const int w = video->width;
                 const int h = video->height;
-                const Uint8 *y = (const Uint8 *) video->yuv;
+                const Uint8 *y = (const Uint8 *) video->pixels;
                 const Uint8 *u = y + (w * h);
                 const Uint8 *v = u + ((w/2) * (h/2));
                 Uint8 *dst;
@@ -282,15 +359,17 @@ static void playfile(const char *fname)
             switch (event.type)
             {
                 case SDL_VIDEOEXPOSE:
-                {
-                    SDL_Rect dstrect = { 0, 0, screen->w, screen->h };
-                    SDL_DisplayYUVOverlay(overlay, &dstrect);
+                    if (overlay)
+                    {
+                        SDL_Rect dstrect = { 0, 0, screen->w, screen->h };
+                        SDL_DisplayYUVOverlay(overlay, &dstrect);
+                    } // if
                     break;
-                } // case
 
                 case SDL_QUIT:
                     quit = 1;
                     break;
+
                 case SDL_KEYDOWN:
                     if (event.key.keysym.sym == SDLK_ESCAPE)
                         quit = 1;
@@ -315,6 +394,7 @@ static void playfile(const char *fname)
     else
         printf("done with this file!\n");
 
+    if (shadow) SDL_FreeSurface(shadow);
     if (overlay) SDL_FreeYUVOverlay(overlay);
     if (video) THEORAPLAY_freeVideo(video);
     if (audio) THEORAPLAY_freeAudio(audio);
@@ -325,10 +405,20 @@ static void playfile(const char *fname)
 
 int main(int argc, char **argv)
 {
+    THEORAPLAY_VideoFormat vidfmt = THEORAPLAY_VIDFMT_YV12;
     int i;
 
     for (i = 1; i < argc; i++)
-        playfile(argv[i]);
+    {
+        if (strcmp(argv[i], "--rgb") == 0)
+            vidfmt = THEORAPLAY_VIDFMT_RGB;
+        else if (strcmp(argv[i], "--rgba") == 0)
+            vidfmt = THEORAPLAY_VIDFMT_RGBA;
+        else if (strcmp(argv[i], "--yv12") == 0)
+            vidfmt = THEORAPLAY_VIDFMT_YV12;
+        else
+            playfile(argv[i], vidfmt);
+    } // for
 
     printf("done all files!\n");
 
