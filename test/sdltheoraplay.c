@@ -90,9 +90,18 @@ static void queue_audio(const THEORAPLAY_AudioPacket *audio)
 } // queue_audio
 
 
-static int need_overlay(const THEORAPLAY_VideoFormat vidfmt)
+static Uint32 sdlyuvfmt(const THEORAPLAY_VideoFormat vidfmt)
 {
-    return (vidfmt == THEORAPLAY_VIDFMT_YV12);
+    switch (vidfmt)
+    {
+        case THEORAPLAY_VIDFMT_YV12:
+            return SDL_YV12_OVERLAY;
+        case THEORAPLAY_VIDFMT_IYUV:
+            return SDL_IYUV_OVERLAY;
+        default: break;
+    } // switch
+
+    return 0;
 } // need_overlay
 
 
@@ -119,6 +128,7 @@ static void setcaption(const char *fname,
         case THEORAPLAY_VIDFMT_RGB:  fmtstr = "RGB";  break;
         case THEORAPLAY_VIDFMT_RGBA: fmtstr = "RGBA"; break;
         case THEORAPLAY_VIDFMT_YV12: fmtstr = "YV12"; break;
+        case THEORAPLAY_VIDFMT_IYUV: fmtstr = "IYUV"; break;
         default: assert(0 && "Unexpected video format!"); break;
     } // switch
 
@@ -178,7 +188,8 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt)
     // Set the video mode as soon as we know what it should be.
     if (video)
     {
-        const int needoverlay = need_overlay(vidfmt);
+        const Uint32 overlayfmt = sdlyuvfmt(vidfmt);
+        const int needoverlay = overlayfmt != 0;
         framems = (video->fps == 0.0) ? 0 : ((Uint32) (1000.0 / video->fps));
         setcaption(fname, vidfmt, video, audio);
         screen = SDL_SetVideoMode(video->width, video->height, 0, 0);
@@ -193,7 +204,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt)
             if (needoverlay)
             {
                 overlay = SDL_CreateYUVOverlay(video->width, video->height,
-                                               SDL_YV12_OVERLAY, screen);
+                                               overlayfmt, screen);
 
                 if (!overlay)
                     fprintf(stderr, "YUV Overlay failed: %s\n", SDL_GetError());
@@ -416,6 +427,8 @@ int main(int argc, char **argv)
             vidfmt = THEORAPLAY_VIDFMT_RGBA;
         else if (strcmp(argv[i], "--yv12") == 0)
             vidfmt = THEORAPLAY_VIDFMT_YV12;
+        else if (strcmp(argv[i], "--iyuv") == 0)
+            vidfmt = THEORAPLAY_VIDFMT_IYUV;
         else
             playfile(argv[i], vidfmt);
     } // for

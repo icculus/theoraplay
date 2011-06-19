@@ -34,8 +34,9 @@ typedef THEORAPLAY_AudioPacket AudioPacket;
 typedef unsigned char *(*ConvertVideoFrameFn)(const th_info *tinfo,
                                               const th_ycbcr_buffer ycbcr);
 
-static unsigned char *ConvertVideoFrame420ToYV12(const th_info *tinfo,
-                                                 const th_ycbcr_buffer ycbcr)
+static unsigned char *ConvertVideoFrame420ToYUVPlanar(
+                            const th_info *tinfo, const th_ycbcr_buffer ycbcr,
+                            const int p0, const int p1, const int p2)
 {
     int i;
     const int w = tinfo->pic_width;
@@ -47,15 +48,29 @@ static unsigned char *ConvertVideoFrame420ToYV12(const th_info *tinfo,
     {
         unsigned char *dst = yuv;
         for (i = 0; i < h; i++, dst += w)
-            memcpy(dst, ycbcr[0].data + yoff + ycbcr[0].stride * i, w);
+            memcpy(dst, ycbcr[p0].data + yoff + ycbcr[p0].stride * i, w);
         for (i = 0; i < (h / 2); i++, dst += w/2)
-            memcpy(dst, ycbcr[2].data + uvoff + ycbcr[2].stride * i, w / 2);
+            memcpy(dst, ycbcr[p1].data + uvoff + ycbcr[p1].stride * i, w / 2);
         for (i = 0; i < (h / 2); i++, dst += w/2)
-            memcpy(dst, ycbcr[1].data + uvoff + ycbcr[1].stride * i, w / 2);
+            memcpy(dst, ycbcr[p2].data + uvoff + ycbcr[p2].stride * i, w / 2);
     } // if
 
     return yuv;
+} // ConvertVideoFrame420ToYUVPlanar
+
+
+static unsigned char *ConvertVideoFrame420ToYV12(const th_info *tinfo,
+                                                 const th_ycbcr_buffer ycbcr)
+{
+    return ConvertVideoFrame420ToYUVPlanar(tinfo, ycbcr, 0, 2, 1);
 } // ConvertVideoFrame420ToYV12
+
+
+static unsigned char *ConvertVideoFrame420ToIYUV(const th_info *tinfo,
+                                                 const th_ycbcr_buffer ycbcr)
+{
+    return ConvertVideoFrame420ToYUVPlanar(tinfo, ycbcr, 0, 1, 2);
+} // ConvertVideoFrame420ToIYUV
 
 
 // RGB
@@ -481,6 +496,7 @@ THEORAPLAY_Decoder *THEORAPLAY_startDecode(const char *fname,
         // !!! FIXME: current expects TH_PF_420.
         #define VIDCVT(t) case THEORAPLAY_VIDFMT_##t: vidcvt = ConvertVideoFrame420To##t; break;
         VIDCVT(YV12)
+        VIDCVT(IYUV)
         VIDCVT(RGB)
         VIDCVT(RGBA)
         #undef VIDCVT
