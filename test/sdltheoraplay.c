@@ -11,6 +11,17 @@
 #include <unistd.h>
 #include <assert.h>
 
+#define SUPPORT_OPENGL 1
+
+#if SUPPORT_OPENGL
+#define GL_GLEXT_LEGACY 0
+#ifdef __APPLE__
+#include <OpenGL/OpenGL.h>
+#else
+#include <GL/gl.h>
+#endif
+#endif
+
 #include "theoraplay.h"
 #include "SDL.h"
 
@@ -105,7 +116,7 @@ static Uint32 sdlyuvfmt(const THEORAPLAY_VideoFormat vidfmt)
 } // need_overlay
 
 
-static void setcaption(const char *fname,
+static void setcaption(const char *fname, const int opengl,
                        const THEORAPLAY_VideoFormat vidfmt,
                        const THEORAPLAY_VideoFrame *video,
                        const THEORAPLAY_AudioPacket *audio)
@@ -113,6 +124,7 @@ static void setcaption(const char *fname,
     char buf[1024];
     const char *fmtstr = "???";
     const char *basefname = NULL;
+    const char *renderer = opengl ? "OpenGL" : "Software";
 
     if (!video)
         return;  // no caption to set.
@@ -134,22 +146,133 @@ static void setcaption(const char *fname,
 
     if (audio)
     {
-        snprintf(buf, sizeof (buf), "%s (%ux%u, %.2gfps, %s, %uch, %uHz)",
+        snprintf(buf, sizeof (buf), "%s (%ux%u, %.2gfps, %s %s, %uch, %uHz)",
                  basefname, video->width, video->height, video->fps,
-                 fmtstr, audio->channels, audio->freq);
+                 renderer, fmtstr, audio->channels, audio->freq);
     } // if
     else
     {
-        snprintf(buf, sizeof (buf), "%s (%ux%u, %ffps, %s, no audio)",
+        snprintf(buf, sizeof (buf), "%s (%ux%u, %ffps, %s %s, no audio)",
                  basefname, video->width, video->height, video->fps,
-                 fmtstr);
+                 renderer, fmtstr);
     } // else
 
     SDL_WM_SetCaption(buf, basefname);
 } // setcaption
 
+#if SUPPORT_OPENGL
+static void openglfmt(const THEORAPLAY_VideoFrame *video,
+                      GLenum *glfmt, GLenum *gltype,
+                      GLsizei *glwidth, GLsizei *glheight)
+{
+    switch (video->format)
+    {
+        case THEORAPLAY_VIDFMT_RGB:
+            *glfmt = GL_RGB;
+            *gltype = GL_UNSIGNED_BYTE;
+            *glwidth = video->width;
+            *glheight = video->height;
+            break;
+        case THEORAPLAY_VIDFMT_RGBA:
+            *glfmt = GL_RGBA;
+            *gltype = GL_UNSIGNED_INT_8_8_8_8_REV;
+            *glwidth = video->width;
+            *glheight = video->height;
+            break;
+        case THEORAPLAY_VIDFMT_YV12:
+        case THEORAPLAY_VIDFMT_IYUV:
+            *glfmt = GL_LUMINANCE;
+            *gltype = GL_UNSIGNED_BYTE;
+            *glwidth = (video->width * video->height) + (video->width * (video->height / 2));
+            *glheight = 1;
+            break;
+    } // switch
+} // openglfmt
 
-static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt)
+static const char *glsl_rgba_vertex =
+    "#version 110\n"
+    "attribute vec2 pos;\n"
+    "attribute vec2 tex;\n"
+    "void main() {\n"
+        "gl_Position = vec4(pos.x, pos.y, 0.0, 1.0);\n"
+        "gl_TexCoord[0].xy = tex.xy;\n"
+    "}\n";
+
+static const char *glsl_rgba_fragment =
+    "#version 110\n"
+    "uniform sampler2D samp;\n"
+    "void main() { gl_FragColor = texture2D(samp, gl_TexCoord[0].xy); }\n";
+            
+static int init_shaders(const THEORAPLAY_VideoFormat vidfmt)
+{
+    const char *vertexsrc = NULL;
+    const char *fragmentsrc = NULL;
+    GLuint vertex = 0;
+    GLuint fragment = 0;
+    GLuint program = 0;
+    GLint ok = 0;
+    GLint shaderlen = 0;
+
+    switch (vidfmt)
+    {
+        case THEORAPLAY_VIDFMT_RGB:
+        case THEORAPLAY_VIDFMT_RGBA:
+            vertexsrc = glsl_rgba_vertex;
+            fragmentsrc = glsl_rgba_fragment;
+            break;
+//        case THEORAPLAY_VIDFMT_YV12:
+//        case THEORAPLAY_VIDFMT_IYUV:
+        default: return 0;
+    } // switch
+
+    ok = 0;
+    shaderlen = (GLint) strlen(vertexsrc);
+    vertex = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertex, 1, (const GLchar **) &vertexsrc, &shaderlen);
+    glCompileShader(vertex);
+    glGetShaderiv(vertex, GL_COMPILE_STATUS, &ok);
+    if (!ok)
+    {
+        glDeleteShader(vertex);
+        return 0;
+    } // if
+
+    ok = 0;
+    shaderlen = (GLint) strlen(fragmentsrc);
+    fragment = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragment, 1, (const GLchar **) &fragmentsrc, &shaderlen);
+    glCompileShader(fragment);
+    glGetShaderiv(fragment, GL_COMPILE_STATUS, &ok);
+    if (!ok)
+    {
+        glDeleteShader(fragment);
+        return 0;
+    } // if
+
+    ok = 0;
+    program = glCreateProgram();
+    glAttachShader(program, vertex);
+    glAttachShader(program, fragment);
+    glBindAttribLocation(program, 0, "pos");
+    glBindAttribLocation(program, 1, "tex");
+    glLinkProgram(program);
+    glDeleteShader(vertex);
+    glDeleteShader(fragment);
+    glGetProgramiv(program, GL_LINK_STATUS, &ok);
+    if (!ok)
+    {
+        glDeleteProgram(program);
+        return 0;
+    } // if
+
+    glUseProgram(program);
+
+    return 1;
+} // init_shaders
+#endif
+
+static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
+                     const int opengl)
 {
     THEORAPLAY_Decoder *decoder = NULL;
     const THEORAPLAY_VideoFrame *video = NULL;
@@ -157,12 +280,18 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt)
     SDL_Surface *screen = NULL;
     SDL_Surface *shadow = NULL;
     SDL_Overlay *overlay = NULL;
+    GLenum glfmt = GL_NONE;
+    GLenum gltype = GL_NONE;
+    GLuint texture = 0;
+    GLsizei glwidth = 0;
+    GLsizei glheight = 0;
     SDL_Event event;
     Uint32 framems = 0;
     int initfailed = 0;
     int quit = 0;
 
     printf("Trying file '%s' ...\n", fname);
+
     decoder = THEORAPLAY_startDecode(fname, 20, vidfmt);
     if (!decoder)
     {
@@ -188,14 +317,69 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt)
     // Set the video mode as soon as we know what it should be.
     if (video)
     {
+        const Uint32 flags = opengl ? SDL_OPENGL : 0;
         const Uint32 overlayfmt = sdlyuvfmt(vidfmt);
         const int needoverlay = overlayfmt != 0;
         framems = (video->fps == 0.0) ? 0 : ((Uint32) (1000.0 / video->fps));
-        setcaption(fname, vidfmt, video, audio);
-        screen = SDL_SetVideoMode(video->width, video->height, 0, 0);
+        setcaption(fname, opengl, vidfmt, video, audio);
+        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+        screen = SDL_SetVideoMode(video->width, video->height, 0, flags);
+
         if (!screen)
             fprintf(stderr, "SDL_SetVideoMode() failed: %s\n", SDL_GetError());
-        else
+
+        #if SUPPORT_OPENGL
+        else if (opengl)
+        {
+            static struct { float pos[2]; float tex[2]; } verts[4] = {
+                { { -1.0f,  1.0f }, { 0.0f, 0.0f } },
+                { {  1.0f,  1.0f }, { 1.0f, 0.0f } },
+                { { -1.0f, -1.0f }, { 0.0f, 1.0f } },
+                { {  1.0f, -1.0f }, { 1.0f, 1.0f } }
+            };
+
+            glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
+            SDL_GL_SwapBuffers();
+            glClear(GL_COLOR_BUFFER_BIT);
+            SDL_GL_SwapBuffers();
+            glClear(GL_COLOR_BUFFER_BIT);
+            SDL_GL_SwapBuffers();
+
+            openglfmt(video, &glfmt, &gltype, &glwidth, &glheight);
+
+            if (!init_shaders(vidfmt))
+            {
+                SDL_Quit();
+                return;
+            } // if
+
+            glVertexAttribPointer(0, 2, GL_FLOAT, 0, sizeof (verts[0]), &verts[0].pos[0]);
+            glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof (verts[0]), &verts[0].tex[0]);
+            glEnableVertexAttribArray(0);
+            glEnableVertexAttribArray(1);
+
+            glDepthMask(GL_FALSE);
+            glDisable(GL_DEPTH_TEST);
+            glDisable(GL_ALPHA_TEST);
+            glDisable(GL_BLEND);
+            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+            glActiveTexture(GL_TEXTURE0);
+            glGenTextures(1, &texture);
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+            glTexImage2D(GL_TEXTURE_2D, 0, glfmt, glwidth, glheight, 0,
+                         glfmt, gltype, NULL);
+        } // else if
+        #endif
+
+        else  // software surface
         {
             // blank out the screen to start.
             SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0));
@@ -288,6 +472,16 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt)
                     fprintf(stderr, "WARNING: Playback can't keep up!\n");
                 } // if
             } // if
+
+            #if SUPPORT_OPENGL
+            else if (opengl)
+            {
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, glwidth, glheight,
+                                glfmt, gltype, video->pixels);
+                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                SDL_GL_SwapBuffers();
+            } // else if
+            #endif
 
             else if (!overlay)  // not a YUV thing.
             {
@@ -417,6 +611,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt)
 int main(int argc, char **argv)
 {
     THEORAPLAY_VideoFormat vidfmt = THEORAPLAY_VIDFMT_YV12;
+    int opengl = 0;
     int i;
 
     for (i = 1; i < argc; i++)
@@ -429,8 +624,14 @@ int main(int argc, char **argv)
             vidfmt = THEORAPLAY_VIDFMT_YV12;
         else if (strcmp(argv[i], "--iyuv") == 0)
             vidfmt = THEORAPLAY_VIDFMT_IYUV;
+        #if SUPPORT_OPENGL
+        else if (strcmp(argv[i], "--opengl") == 0)
+            opengl = 1;
+        #endif
+        else if (strcmp(argv[i], "--software") == 0)
+            opengl = 0;
         else
-            playfile(argv[i], vidfmt);
+            playfile(argv[i], vidfmt, opengl);
     } // for
 
     printf("done all files!\n");
