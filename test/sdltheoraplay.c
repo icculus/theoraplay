@@ -175,31 +175,7 @@ static const char *glsl_rgba_fragment =
     "uniform sampler2D samp;\n"
     "void main() { gl_FragColor = texture2D(samp, gl_TexCoord[0].xy); }\n";
 
-/*
-static const char *glsl_yuv_fragment =
-    "#version 110\n"
-    "uniform sampler2D samp0;\n"
-    "uniform sampler2D samp1;\n"
-    "uniform sampler2D samp2;\n"
-    "const vec3 offset = vec3(16.0/255.0, 128.0/255.0, 128.0/255.0);\n"
-    "const vec3 excursion = vec3(219.0/255.0, 224.0/255.0, 224.0/255.0);\n"
-    "const float kr = 0.299;\n"
-    "const float kb = 0.114;\n"
-    "void main() {\n"
-    "    vec2 tcoord = gl_TexCoord[0].xy;\n"
-    "    vec3 yuv, rgb;\n"
-    "    yuv.x = texture2D(samp0, tcoord).r;\n"
-    "    yuv.y = texture2D(samp1, tcoord).r;\n"
-    "    yuv.z = texture2D(samp2, tcoord).r;\n"
-    "    yuv -= offset;\n"
-    "    yuv /= excursion;\n"
-    "    rgb.x = (yuv.x + (2.0 * (1.0 - kr) * yuv.z));\n"
-    "    rgb.y = (yuv.x - ((2.0 * (((1.0 - kb) * kb) / ((1.0 - kb) - kr))) * yuv.y) - ((2.0 * (((1.0 - kr) * kr) / ((1.0 - kb) - kr))) * yuv.z));\n"
-    "    rgb.z = (yuv.x + (2.0 * (1.0 - kb) * yuv.y));\n"
-    "    gl_FragColor = vec4(rgb.zzz, 1.0);\n"
-    "}\n";
-*/
-
+// This shader was originally from SDL 1.3.
 static const char *glsl_yuv_fragment =
     "#version 110\n"
     "uniform sampler2D samp0;\n"
