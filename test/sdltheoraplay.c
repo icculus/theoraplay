@@ -161,51 +161,71 @@ static void setcaption(const char *fname, const int opengl,
 } // setcaption
 
 #if SUPPORT_OPENGL
-static void openglfmt(const THEORAPLAY_VideoFrame *video,
-                      GLenum *glfmt, GLenum *gltype,
-                      GLsizei *glwidth, GLsizei *glheight)
-{
-    switch (video->format)
-    {
-        case THEORAPLAY_VIDFMT_RGB:
-            *glfmt = GL_RGB;
-            *gltype = GL_UNSIGNED_BYTE;
-            *glwidth = video->width;
-            *glheight = video->height;
-            break;
-        case THEORAPLAY_VIDFMT_RGBA:
-            *glfmt = GL_RGBA;
-            *gltype = GL_UNSIGNED_INT_8_8_8_8_REV;
-            *glwidth = video->width;
-            *glheight = video->height;
-            break;
-        case THEORAPLAY_VIDFMT_YV12:
-        case THEORAPLAY_VIDFMT_IYUV:
-            *glfmt = GL_LUMINANCE;
-            *gltype = GL_UNSIGNED_BYTE;
-            *glwidth = (video->width * video->height) + (video->width * (video->height / 2));
-            *glheight = 1;
-            break;
-    } // switch
-} // openglfmt
-
-static const char *glsl_rgba_vertex =
+static const char *glsl_vertex =
     "#version 110\n"
     "attribute vec2 pos;\n"
     "attribute vec2 tex;\n"
     "void main() {\n"
-        "gl_Position = vec4(pos.x, pos.y, 0.0, 1.0);\n"
-        "gl_TexCoord[0].xy = tex.xy;\n"
+        "gl_Position = vec4(pos.xy, 0.0, 1.0);\n"
+        "gl_TexCoord[0].xy = tex;\n"
     "}\n";
 
 static const char *glsl_rgba_fragment =
     "#version 110\n"
     "uniform sampler2D samp;\n"
     "void main() { gl_FragColor = texture2D(samp, gl_TexCoord[0].xy); }\n";
-            
+
+/*
+static const char *glsl_yuv_fragment =
+    "#version 110\n"
+    "uniform sampler2D samp0;\n"
+    "uniform sampler2D samp1;\n"
+    "uniform sampler2D samp2;\n"
+    "const vec3 offset = vec3(16.0/255.0, 128.0/255.0, 128.0/255.0);\n"
+    "const vec3 excursion = vec3(219.0/255.0, 224.0/255.0, 224.0/255.0);\n"
+    "const float kr = 0.299;\n"
+    "const float kb = 0.114;\n"
+    "void main() {\n"
+    "    vec2 tcoord = gl_TexCoord[0].xy;\n"
+    "    vec3 yuv, rgb;\n"
+    "    yuv.x = texture2D(samp0, tcoord).r;\n"
+    "    yuv.y = texture2D(samp1, tcoord).r;\n"
+    "    yuv.z = texture2D(samp2, tcoord).r;\n"
+    "    yuv -= offset;\n"
+    "    yuv /= excursion;\n"
+    "    rgb.x = (yuv.x + (2.0 * (1.0 - kr) * yuv.z));\n"
+    "    rgb.y = (yuv.x - ((2.0 * (((1.0 - kb) * kb) / ((1.0 - kb) - kr))) * yuv.y) - ((2.0 * (((1.0 - kr) * kr) / ((1.0 - kb) - kr))) * yuv.z));\n"
+    "    rgb.z = (yuv.x + (2.0 * (1.0 - kb) * yuv.y));\n"
+    "    gl_FragColor = vec4(rgb.zzz, 1.0);\n"
+    "}\n";
+*/
+
+static const char *glsl_yuv_fragment =
+    "#version 110\n"
+    "uniform sampler2D samp0;\n"
+    "uniform sampler2D samp1;\n"
+    "uniform sampler2D samp2;\n"
+    "const vec3 offset = vec3(-0.0625, -0.5, -0.5);\n"
+    "const vec3 Rcoeff = vec3(1.164,  0.000,  1.596);\n"
+    "const vec3 Gcoeff = vec3(1.164, -0.391, -0.813);\n"
+    "const vec3 Bcoeff = vec3(1.164,  2.018,  0.000);\n"
+    "void main() {\n"
+    "    vec2 tcoord;\n"
+    "    vec3 yuv, rgb;\n"
+    "    tcoord = gl_TexCoord[0].xy;\n"
+    "    yuv.x = texture2D(samp0, tcoord).r;\n"
+    "    yuv.y = texture2D(samp1, tcoord).r;\n"
+    "    yuv.z = texture2D(samp2, tcoord).r;\n"
+    "    yuv += offset;\n"
+    "    rgb.r = dot(yuv, Rcoeff);\n"
+    "    rgb.g = dot(yuv, Gcoeff);\n"
+    "    rgb.b = dot(yuv, Bcoeff);\n"
+    "    gl_FragColor = vec4(rgb, 1.0);\n"
+    "}\n";
+
 static int init_shaders(const THEORAPLAY_VideoFormat vidfmt)
 {
-    const char *vertexsrc = NULL;
+    const char *vertexsrc = glsl_vertex;
     const char *fragmentsrc = NULL;
     GLuint vertex = 0;
     GLuint fragment = 0;
@@ -217,11 +237,12 @@ static int init_shaders(const THEORAPLAY_VideoFormat vidfmt)
     {
         case THEORAPLAY_VIDFMT_RGB:
         case THEORAPLAY_VIDFMT_RGBA:
-            vertexsrc = glsl_rgba_vertex;
             fragmentsrc = glsl_rgba_fragment;
             break;
-//        case THEORAPLAY_VIDFMT_YV12:
-//        case THEORAPLAY_VIDFMT_IYUV:
+        case THEORAPLAY_VIDFMT_YV12:
+        case THEORAPLAY_VIDFMT_IYUV:
+            fragmentsrc = glsl_yuv_fragment;
+            break;
         default: return 0;
     } // switch
 
@@ -267,9 +288,76 @@ static int init_shaders(const THEORAPLAY_VideoFormat vidfmt)
 
     glUseProgram(program);
 
+    if (fragmentsrc == glsl_rgba_fragment)
+        glUniform1i(glGetUniformLocation(program, "samp"), 0);
+    else if (fragmentsrc == glsl_yuv_fragment)
+    {
+        glUniform1i(glGetUniformLocation(program, "samp0"), 0);
+        glUniform1i(glGetUniformLocation(program, "samp1"), 1);
+        glUniform1i(glGetUniformLocation(program, "samp2"), 2);
+    } // else if
+
     return 1;
 } // init_shaders
-#endif
+
+static void prep_texture(GLuint *texture, const int idx)
+{
+    glActiveTexture(GL_TEXTURE0 + idx);
+    glBindTexture(GL_TEXTURE_2D, texture[idx]);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+} // prep_texture
+
+
+static void init_textures(const THEORAPLAY_VideoFrame *video,
+                          const GLenum glfmt, const GLenum gltype,
+                          GLuint *texture)
+{
+    const int planar = (sdlyuvfmt(video->format) != 0);
+
+    glGenTextures(planar ? 3 : 1, texture);
+    prep_texture(texture, 0);
+    glTexImage2D(GL_TEXTURE_2D, 0, glfmt, video->width, video->height, 0,
+                 glfmt, gltype, NULL);
+
+    if (planar)
+    {
+        prep_texture(texture, 1);
+        glTexImage2D(GL_TEXTURE_2D, 0, glfmt, video->width / 2,
+                     video->height / 2, 0, glfmt, gltype, NULL);
+        prep_texture(texture, 2);
+        glTexImage2D(GL_TEXTURE_2D, 0, glfmt, video->width / 2,
+                     video->height / 2, 0, glfmt, gltype, NULL);
+    } // if
+} // init_textures
+
+static void openglfmt(const THEORAPLAY_VideoFrame *video,
+                      GLenum *glfmt, GLenum *gltype)
+{
+    switch (video->format)
+    {
+        case THEORAPLAY_VIDFMT_RGB:
+            *glfmt = GL_RGB;
+            *gltype = GL_UNSIGNED_BYTE;
+            break;
+        case THEORAPLAY_VIDFMT_RGBA:
+            *glfmt = GL_RGBA;
+            *gltype = GL_UNSIGNED_INT_8_8_8_8_REV;
+            break;
+        case THEORAPLAY_VIDFMT_YV12:
+        case THEORAPLAY_VIDFMT_IYUV:
+            *glfmt = GL_LUMINANCE;
+            *gltype = GL_UNSIGNED_BYTE;
+            break;
+    } // switch
+} // openglfmt
+
+#endif  // SUPPORT_OPENGL
+
 
 static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
                      const int opengl)
@@ -282,12 +370,11 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
     SDL_Overlay *overlay = NULL;
     GLenum glfmt = GL_NONE;
     GLenum gltype = GL_NONE;
-    GLuint texture = 0;
-    GLsizei glwidth = 0;
-    GLsizei glheight = 0;
+    GLuint texture[3] = { 0, 0, 0 };
     SDL_Event event;
     Uint32 framems = 0;
     int initfailed = 0;
+    int planar = 0;
     int quit = 0;
 
     printf("Trying file '%s' ...\n", fname);
@@ -319,7 +406,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
     {
         const Uint32 flags = opengl ? SDL_OPENGL : 0;
         const Uint32 overlayfmt = sdlyuvfmt(vidfmt);
-        const int needoverlay = overlayfmt != 0;
+        planar = (overlayfmt != 0);
         framems = (video->fps == 0.0) ? 0 : ((Uint32) (1000.0 / video->fps));
         setcaption(fname, opengl, vidfmt, video, audio);
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
@@ -346,7 +433,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
             glClear(GL_COLOR_BUFFER_BIT);
             SDL_GL_SwapBuffers();
 
-            openglfmt(video, &glfmt, &gltype, &glwidth, &glheight);
+            openglfmt(video, &glfmt, &gltype);
 
             if (!init_shaders(vidfmt))
             {
@@ -365,17 +452,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
             glDisable(GL_BLEND);
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-            glActiveTexture(GL_TEXTURE0);
-            glGenTextures(1, &texture);
-            glBindTexture(GL_TEXTURE_2D, texture);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-            glTexImage2D(GL_TEXTURE_2D, 0, glfmt, glwidth, glheight, 0,
-                         glfmt, gltype, NULL);
+            init_textures(video, glfmt, gltype, texture);
         } // else if
         #endif
 
@@ -385,7 +462,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
             SDL_FillRect(screen, NULL, SDL_MapRGB(screen->format, 0, 0, 0));
             SDL_Flip(screen);
 
-            if (needoverlay)
+            if (planar)
             {
                 overlay = SDL_CreateYUVOverlay(video->width, video->height,
                                                overlayfmt, screen);
@@ -412,7 +489,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
             } // else
         } // else
 
-        initfailed = quit = (!screen || (needoverlay ? !overlay : !shadow));
+        initfailed = quit = (!screen || (planar ? !overlay : !shadow));
     } // if
 
     // Open the audio device as soon as we know what it should be.
@@ -476,8 +553,26 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
             #if SUPPORT_OPENGL
             else if (opengl)
             {
-                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, glwidth, glheight,
-                                glfmt, gltype, video->pixels);
+                GLint w = video->width;
+                GLint h = video->height;
+                const Uint8 *pix = (const Uint8 *) video->pixels;
+
+                glActiveTexture(GL_TEXTURE0);
+                glBindTexture(GL_TEXTURE_2D, texture[0]);
+                glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, glfmt, gltype, pix);
+                if (planar)
+                {
+                    const int swapped = (vidfmt == THEORAPLAY_VIDFMT_YV12);
+                    pix += w * h;
+                    glActiveTexture(swapped ? GL_TEXTURE2 : GL_TEXTURE1);
+                    glBindTexture(GL_TEXTURE_2D, texture[1]);
+                    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w / 2, h / 2, glfmt, gltype, pix);
+                    pix += (w / 2) * (h / 2);
+                    glActiveTexture(swapped ? GL_TEXTURE1 : GL_TEXTURE2);
+                    glBindTexture(GL_TEXTURE_2D, texture[2]);
+                    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w / 2, h / 2, glfmt, gltype, pix);
+                } // if
+
                 glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
                 SDL_GL_SwapBuffers();
             } // else if
