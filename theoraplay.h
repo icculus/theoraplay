@@ -13,6 +13,14 @@
 extern "C" {
 #endif
 
+typedef struct THEORAPLAY_Io THEORAPLAY_Io;
+struct THEORAPLAY_Io
+{
+    long (*read)(THEORAPLAY_Io *io, void *buf, long buflen);
+    void (*close)(THEORAPLAY_Io *io);
+    void *userdata;
+};
+
 typedef struct THEORAPLAY_Decoder THEORAPLAY_Decoder;
 
 /* YV12 is YCrCb, not YCbCr; that's what SDL uses for YV12 overlays. */
@@ -45,7 +53,10 @@ typedef struct THEORAPLAY_AudioPacket
     struct THEORAPLAY_AudioPacket *next;
 } THEORAPLAY_AudioPacket;
 
-THEORAPLAY_Decoder *THEORAPLAY_startDecode(const char *fname,
+THEORAPLAY_Decoder *THEORAPLAY_startDecodeFile(const char *fname,
+                                               const unsigned int maxframes,
+                                               THEORAPLAY_VideoFormat vidfmt);
+THEORAPLAY_Decoder *THEORAPLAY_startDecode(THEORAPLAY_Io *io,
                                            const unsigned int maxframes,
                                            THEORAPLAY_VideoFormat vidfmt);
 void THEORAPLAY_stopDecode(THEORAPLAY_Decoder *decoder);

@@ -100,7 +100,7 @@ typedef struct TheoraDecoder
     pthread_t worker;
 
     // Ogg, Vorbis, and Theora decoder state...
-    int fd;
+    THEORAPLAY_Io *io;
 
     // API state...
     unsigned int maxframes;  // Max video frames to buffer.
@@ -115,15 +115,14 @@ typedef struct TheoraDecoder
 } TheoraDecoder;
 
 
-static int FeedMoreOggData(const int fd, ogg_sync_state *sync)
+static int FeedMoreOggData(THEORAPLAY_Io *io, ogg_sync_state *sync)
 {
     long buflen = 4096;
     char *buffer = ogg_sync_buffer(sync, buflen);
     if (buffer == NULL)
         return -1;
 
-    while ( ((buflen = read(fd, buffer, buflen)) < 0) && (errno == EINTR) ) {}
-
+    buflen = io->read(io, buffer, buflen);
     if (buflen <= 0)
         return 0;
 
@@ -175,7 +174,7 @@ static void WorkerThread(TheoraDecoder *ctx)
     int bos = 1;
     while (!ctx->halt && bos)
     {
-        if (FeedMoreOggData(ctx->fd, &sync) <= 0)
+        if (FeedMoreOggData(ctx->io, &sync) <= 0)
             goto cleanup;
 
         // parse out the initial header.
@@ -240,7 +239,7 @@ static void WorkerThread(TheoraDecoder *ctx)
         // get another page, try again?
         if (ogg_sync_pageout(&sync, &page) > 0)
             queue_ogg_page(ctx);
-        else if (FeedMoreOggData(ctx->fd, &sync) <= 0)
+        else if (FeedMoreOggData(ctx->io, &sync) <= 0)
             goto cleanup;
     } // while
 
@@ -425,7 +424,7 @@ static void WorkerThread(TheoraDecoder *ctx)
 
         if (!ctx->halt && need_pages)
         {
-            const int rc = FeedMoreOggData(ctx->fd, &sync);
+            const int rc = FeedMoreOggData(ctx->io, &sync);
             if (rc == 0)
                 eos = 1;  // end of stream
             else if (rc < 0)
@@ -470,7 +469,7 @@ cleanup:
     vorbis_comment_clear(&vcomment);
     vorbis_info_clear(&vinfo);
     ogg_sync_clear(&sync);
-    close(ctx->fd);
+    ctx->io->close(ctx->io);
     ctx->thread_done = 1;
 } // WorkerThread
 
@@ -484,7 +483,47 @@ static void *WorkerThreadEntry(void *_this)
 } // WorkerThreadEntry
 
 
-THEORAPLAY_Decoder *THEORAPLAY_startDecode(const char *fname,
+static long IoFopenRead(THEORAPLAY_Io *io, void *buf, long buflen)
+{
+    FILE *f = (FILE *) io->userdata;
+    const size_t br = fread(buf, 1, buflen, f);
+    if ((br == 0) && ferror(f))
+        return -1;
+    return (long) br;
+} // IoFopenRead
+
+
+static void IoFopenClose(THEORAPLAY_Io *io)
+{
+    FILE *f = (FILE *) io->userdata;
+    fclose(f);
+    free(io);
+} // IoFopenClose
+
+
+THEORAPLAY_Decoder *THEORAPLAY_startDecodeFile(const char *fname,
+                                               const unsigned int maxframes,
+                                               THEORAPLAY_VideoFormat vidfmt)
+{
+    THEORAPLAY_Io *io = (THEORAPLAY_Io *) malloc(sizeof (THEORAPLAY_Io));
+    if (io == NULL)
+        return NULL;
+
+    FILE *f = fopen(fname, "rb");
+    if (f == NULL)
+    {
+        free(io);
+        return NULL;
+    } // if
+
+    io->read = IoFopenRead;
+    io->close = IoFopenClose;
+    io->userdata = f;
+    return THEORAPLAY_startDecode(io, maxframes, vidfmt);
+} // THEORAPLAY_startDecodeFile
+
+
+THEORAPLAY_Decoder *THEORAPLAY_startDecode(THEORAPLAY_Io *io,
                                            const unsigned int maxframes,
                                            THEORAPLAY_VideoFormat vidfmt)
 {
@@ -500,37 +539,30 @@ THEORAPLAY_Decoder *THEORAPLAY_startDecode(const char *fname,
         VIDCVT(RGB)
         VIDCVT(RGBA)
         #undef VIDCVT
-        default: return NULL;  // invalid/unsupported format.
+        default: goto startdecode_failed;  // invalid/unsupported format.
     } // switch
 
     ctx = malloc(sizeof (TheoraDecoder));
     if (ctx == NULL)
-        return NULL;
+        goto startdecode_failed;
 
     memset(ctx, '\0', sizeof (TheoraDecoder));
     ctx->maxframes = maxframes;
     ctx->vidfmt = vidfmt;
     ctx->vidcvt = vidcvt;
+    ctx->io = io;
 
-    ctx->fd = open(fname, O_RDONLY);
-    if (ctx->fd != -1)
+    if (pthread_mutex_init(&ctx->lock, NULL) == 0)
     {
-        struct stat statbuf;
-        if (fstat(ctx->fd, &statbuf) != -1)
-        {
-            if (pthread_mutex_init(&ctx->lock, NULL) == 0)
-            {
-                ctx->thread_created = (pthread_create(&ctx->worker, NULL, WorkerThreadEntry, ctx) == 0);
-                if (ctx->thread_created)
-                    return (THEORAPLAY_Decoder *) ctx;
-            } // if
-
-            pthread_mutex_destroy(&ctx->lock);
-        } // if
-
-        close(ctx->fd);
+        ctx->thread_created = (pthread_create(&ctx->worker, NULL, WorkerThreadEntry, ctx) == 0);
+        if (ctx->thread_created)
+            return (THEORAPLAY_Decoder *) ctx;
     } // if
 
+    pthread_mutex_destroy(&ctx->lock);
+
+startdecode_failed:
+    io->close(io);
     free(ctx);
     return NULL;
 } // THEORAPLAY_startDecode
