@@ -60,8 +60,14 @@ THEORAPLAY_Decoder *THEORAPLAY_startDecode(THEORAPLAY_Io *io,
                                            const unsigned int maxframes,
                                            THEORAPLAY_VideoFormat vidfmt);
 void THEORAPLAY_stopDecode(THEORAPLAY_Decoder *decoder);
+
 int THEORAPLAY_isDecoding(THEORAPLAY_Decoder *decoder);
 int THEORAPLAY_decodingError(THEORAPLAY_Decoder *decoder);
+int THEORAPLAY_isInitialized(THEORAPLAY_Decoder *decoder);
+int THEORAPLAY_hasVideoStream(THEORAPLAY_Decoder *decoder);
+int THEORAPLAY_hasAudioStream(THEORAPLAY_Decoder *decoder);
+unsigned int THEORAPLAY_availableVideo(THEORAPLAY_Decoder *decoder);
+unsigned int THEORAPLAY_availableAudio(THEORAPLAY_Decoder *decoder);
 
 const THEORAPLAY_AudioPacket *THEORAPLAY_getAudio(THEORAPLAY_Decoder *decoder);
 void THEORAPLAY_freeAudio(const THEORAPLAY_AudioPacket *item);

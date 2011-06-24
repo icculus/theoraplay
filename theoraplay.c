@@ -94,16 +94,19 @@ typedef struct TheoraDecoder
     int thread_created;
     pthread_mutex_t lock;
     volatile int halt;
-    volatile unsigned int videocount;
     int thread_done;
-    int decode_error;
     pthread_t worker;
 
-    // Ogg, Vorbis, and Theora decoder state...
-    THEORAPLAY_Io *io;
-
     // API state...
+    THEORAPLAY_Io *io;
     unsigned int maxframes;  // Max video frames to buffer.
+    volatile unsigned int prepped;
+    volatile unsigned int videocount;  // currently buffered frames.
+    volatile unsigned int audioms;  // currently buffered audio samples.
+    volatile int hasvideo;
+    volatile int hasaudio;
+    volatile int decode_error;
+
     THEORAPLAY_VideoFormat vidfmt;
     ConvertVideoFrameFn vidcvt;
 
@@ -295,6 +298,12 @@ static void WorkerThread(TheoraDecoder *ctx)
     // Now we can start the actual decoding!
     // Note that audio and video don't _HAVE_ to start simultaneously.
 
+    pthread_mutex_lock(&ctx->lock);
+    ctx->prepped = 1;
+    ctx->hasvideo = (tpackets != 0);
+    ctx->hasaudio = (vpackets != 0);
+    pthread_mutex_unlock(&ctx->lock);
+
     while (!ctx->halt && !eos)
     {
         int need_pages = 0;  // need more Ogg pages?
@@ -339,6 +348,7 @@ static void WorkerThread(TheoraDecoder *ctx)
 
                 //printf("Decoded %d frames of audio.\n", (int) frames);
                 pthread_mutex_lock(&ctx->lock);
+                ctx->audioms += item->playms;
                 if (ctx->audiolisttail)
                 {
                     assert(ctx->audiolist);
@@ -357,7 +367,11 @@ static void WorkerThread(TheoraDecoder *ctx)
             {
                 // try to feed another packet to the Vorbis stream...
                 if (ogg_stream_packetout(&vstream, &packet) <= 0)
+                {
+                    if (!tpackets)
+                        need_pages = 1; // no video, get more pages now.
                     break;  // we'll get more pages when the video catches up.
+                } // if
                 else
                 {
                     if (vorbis_synthesis(&vblock, &packet) == 0)
@@ -605,16 +619,62 @@ void THEORAPLAY_stopDecode(THEORAPLAY_Decoder *decoder)
 
 int THEORAPLAY_isDecoding(THEORAPLAY_Decoder *decoder)
 {
-    const TheoraDecoder *ctx = (TheoraDecoder *) decoder;
-    return ( ctx && (ctx->audiolist || ctx->videolist ||
-             (ctx->thread_created && !ctx->thread_done)) );
+    TheoraDecoder *ctx = (TheoraDecoder *) decoder;
+    int retval = 0;
+    if (ctx)
+    {
+        pthread_mutex_lock(&ctx->lock);
+        retval = ( ctx && (ctx->audiolist || ctx->videolist ||
+                   (ctx->thread_created && !ctx->thread_done)) );
+        pthread_mutex_unlock(&ctx->lock);
+    } // if
+    return retval;
 } // THEORAPLAY_isDecoding
+
+
+#define GET_SYNCED_VALUE(typ, defval, decoder, member) \
+    TheoraDecoder *ctx = (TheoraDecoder *) decoder; \
+    typ retval = defval; \
+    if (ctx) { \
+        pthread_mutex_lock(&ctx->lock); \
+        retval = ctx->member; \
+        pthread_mutex_unlock(&ctx->lock); \
+    } \
+    return retval;
+
+int THEORAPLAY_isInitialized(THEORAPLAY_Decoder *decoder)
+{
+    GET_SYNCED_VALUE(int, 0, decoder, prepped);
+} // THEORAPLAY_isInitialized
+
+
+int THEORAPLAY_hasVideoStream(THEORAPLAY_Decoder *decoder)
+{
+    GET_SYNCED_VALUE(int, 0, decoder, hasvideo);
+} // THEORAPLAY_hasVideoStream
+
+
+int THEORAPLAY_hasAudioStream(THEORAPLAY_Decoder *decoder)
+{
+    GET_SYNCED_VALUE(int, 0, decoder, hasaudio);
+} // THEORAPLAY_hasAudioStream
+
+
+unsigned int THEORAPLAY_availableVideo(THEORAPLAY_Decoder *decoder)
+{
+    GET_SYNCED_VALUE(unsigned int, 0, decoder, videocount);
+} // THEORAPLAY_hasAudioStream
+
+
+unsigned int THEORAPLAY_availableAudio(THEORAPLAY_Decoder *decoder)
+{
+    GET_SYNCED_VALUE(unsigned int, 0, decoder, audioms);
+} // THEORAPLAY_hasAudioStream
 
 
 int THEORAPLAY_decodingError(THEORAPLAY_Decoder *decoder)
 {
-    const TheoraDecoder *ctx = (TheoraDecoder *) decoder;
-    return (ctx && ctx->decode_error);
+    GET_SYNCED_VALUE(int, 0, decoder, decode_error);
 } // THEORAPLAY_decodingError
 
 
