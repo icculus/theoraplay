@@ -134,9 +134,6 @@ static void setcaption(const char *fname, const int opengl,
     const char *basefname = NULL;
     const char *renderer = opengl ? "OpenGL" : "Software";
 
-    if (!video)
-        return;  // no caption to set.
-
     basefname = strrchr(fname, '/');
     if (!basefname)
         basefname = fname;
@@ -152,21 +149,32 @@ static void setcaption(const char *fname, const int opengl,
         default: assert(0 && "Unexpected video format!"); break;
     } // switch
 
-    if (audio)
+    if (!audio && !video)
+        snprintf(buf, sizeof (buf), "%s (no video, no audio)", basefname);
+    else if (audio && video)
     {
         snprintf(buf, sizeof (buf), "%s (%ux%u, %.2gfps, %s %s, %uch, %uHz)",
                  basefname, video->width, video->height, video->fps,
                  renderer, fmtstr, audio->channels, audio->freq);
-    } // if
-    else
+    } // else if
+    else if (!audio && video)
     {
         snprintf(buf, sizeof (buf), "%s (%ux%u, %ffps, %s %s, no audio)",
                  basefname, video->width, video->height, video->fps,
                  renderer, fmtstr);
-    } // else
+    } // else if
+    else if (audio && !video)
+    {
+        snprintf(buf, sizeof (buf), "%s (no video, %uch, %uHz)",
+                 basefname, audio->channels, audio->freq);
+    } // else if
 
-    SDL_WM_SetCaption(buf, basefname);
+    printf("%s\n", buf);
+
+    if (video)
+        SDL_WM_SetCaption(buf, basefname);
 } // setcaption
+
 
 #if SUPPORT_OPENGL
 static const char *glsl_vertex =
@@ -352,6 +360,9 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
     SDL_Surface *screen = NULL;
     SDL_Surface *shadow = NULL;
     SDL_Overlay *overlay = NULL;
+    int has_audio = 0;
+    int has_video = 0;
+    Uint32 sdlinitflags = 0;
     GLenum glfmt = GL_NONE;
     GLenum gltype = GL_NONE;
     GLuint texture[3] = { 0, 0, 0 };
@@ -370,29 +381,48 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
         return;
     } // if
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) == -1)
+    // Wait until the decoder has parsed out some basic truths from the
+    //  file. In a video game, you could choose not to block on this, and
+    //  instead do something else until the file is ready.
+    while (!THEORAPLAY_isInitialized(decoder))
+        SDL_Delay(10);
+
+    // Once we're initialized, we can tell if this file has audio and/or video.
+    has_audio = THEORAPLAY_hasAudioStream(decoder);
+    has_video = THEORAPLAY_hasVideoStream(decoder);
+
+    if (has_video)
+        sdlinitflags |= SDL_INIT_VIDEO;
+    if (has_audio)
+        sdlinitflags |= SDL_INIT_AUDIO;
+
+    if (SDL_Init(sdlinitflags) == -1)
     {
         fprintf(stderr, "SDL_Init() failed: %s\n", SDL_GetError());
         return;
     } // if
 
-    // wait until we have a video and audio packet, so we can set up hardware.
-    // !!! FIXME: we need an API to decide if this file has only audio/video.
-    while (!video || !audio)
+    // wait until we have video and/or audio data, so we can set up hardware.
+    if (has_audio)
     {
-        SDL_Delay(10);
-        if (!video) video = THEORAPLAY_getVideo(decoder);
-        if (!audio) audio = THEORAPLAY_getAudio(decoder);
-    } // while
+        while ((audio = THEORAPLAY_getAudio(decoder)) == NULL)
+            SDL_Delay(10);
+    } // if
 
-    // Set the video mode as soon as we know what it should be.
-    if (video)
+    if (has_video)
+    {
+        while ((video = THEORAPLAY_getVideo(decoder)) == NULL)
+            SDL_Delay(10);
+    } // if
+
+    setcaption(fname, opengl, vidfmt, video, audio);
+
+    if (has_video)
     {
         const Uint32 flags = opengl ? SDL_OPENGL : 0;
         const Uint32 overlayfmt = sdlyuvfmt(vidfmt);
         planar = (overlayfmt != 0);
         framems = (video->fps == 0.0) ? 0 : ((Uint32) (1000.0 / video->fps));
-        setcaption(fname, opengl, vidfmt, video, audio);
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         screen = SDL_SetVideoMode(video->width, video->height, 0, flags);
 
@@ -477,7 +507,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
     } // if
 
     // Open the audio device as soon as we know what it should be.
-    if (audio)
+    if (has_audio)
     {
         SDL_AudioSpec spec;
         memset(&spec, '\0', sizeof (SDL_AudioSpec));
@@ -491,7 +521,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
 
     baseticks = SDL_GetTicks();
 
-    if (!quit && audio)
+    if (!quit && has_audio)
         SDL_PauseAudio(0);
 
     while (!quit && THEORAPLAY_isDecoding(decoder))
@@ -662,14 +692,17 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
         } // while
     } // while
 
-    while (!quit)
+    if (has_audio)
     {
-        SDL_LockAudio();
-        quit = (audio_queue == NULL);
-        SDL_UnlockAudio();
-        if (!quit)
-            SDL_Delay(100);  // wait for final audio packets to play out.
-    } // while
+        while (!quit)
+        {
+            SDL_LockAudio();
+            quit = (audio_queue == NULL);
+            SDL_UnlockAudio();
+            if (!quit)
+                SDL_Delay(100);  // wait for final audio packets to play out.
+        } // while
+    } // if
 
     if (initfailed)
         printf("Initialization failed!\n");
@@ -683,7 +716,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
     if (video) THEORAPLAY_freeVideo(video);
     if (audio) THEORAPLAY_freeAudio(audio);
     if (decoder) THEORAPLAY_stopDecode(decoder);
-    SDL_CloseAudio();
+    if (has_audio) SDL_CloseAudio();
     SDL_Quit();
 } // playfile
 
