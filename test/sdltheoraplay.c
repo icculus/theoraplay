@@ -452,6 +452,8 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         screen = SDL_SetVideoMode(video->width, video->height, 0, flags);
 
+        initfailed = quit = (initfailed || !screen);
+
         if (!screen)
             fprintf(stderr, "SDL_SetVideoMode() failed: %s\n", SDL_GetError());
 
@@ -475,24 +477,22 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
 
             openglfmt(video, &glfmt, &gltype);
 
-            if (!init_shaders(vidfmt))
+            initfailed = quit = (initfailed || !init_shaders(vidfmt));
+            if (!initfailed)
             {
-                SDL_Quit();
-                return;
+                glVertexAttribPointer(0, 2, GL_FLOAT, 0, sizeof (verts[0]), &verts[0].pos[0]);
+                glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof (verts[0]), &verts[0].tex[0]);
+                glEnableVertexAttribArray(0);
+                glEnableVertexAttribArray(1);
+
+                glDepthMask(GL_FALSE);
+                glDisable(GL_DEPTH_TEST);
+                glDisable(GL_ALPHA_TEST);
+                glDisable(GL_BLEND);
+                glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+
+                init_textures(video, glfmt, gltype, texture);
             } // if
-
-            glVertexAttribPointer(0, 2, GL_FLOAT, 0, sizeof (verts[0]), &verts[0].pos[0]);
-            glVertexAttribPointer(1, 2, GL_FLOAT, 0, sizeof (verts[0]), &verts[0].tex[0]);
-            glEnableVertexAttribArray(0);
-            glEnableVertexAttribArray(1);
-
-            glDepthMask(GL_FALSE);
-            glDisable(GL_DEPTH_TEST);
-            glDisable(GL_ALPHA_TEST);
-            glDisable(GL_BLEND);
-            glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-            init_textures(video, glfmt, gltype, texture);
         } // else if
         #endif
 
@@ -509,6 +509,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
 
                 if (!overlay)
                     fprintf(stderr, "YUV Overlay failed: %s\n", SDL_GetError());
+                initfailed = quit = (initfailed || !overlay);
             } // if
             else
             {
@@ -526,10 +527,9 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
 
                 assert(!shadow || !SDL_MUSTLOCK(shadow));
                 assert(!shadow || (shadow->pitch == (video->width * (bits/8))));
+                initfailed = quit = (initfailed || !shadow);
             } // else
         } // else
-
-        initfailed = quit = (!screen || (planar ? !overlay : !shadow));
     } // if
 
     // Open the audio device as soon as we know what it should be.
