@@ -445,7 +445,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
 
     if (has_video)
     {
-        const Uint32 flags = opengl ? SDL_OPENGL : 0;
+        const Uint32 flags = opengl ? (SDL_OPENGL|SDL_RESIZABLE) : 0;
         const Uint32 overlayfmt = sdlyuvfmt(vidfmt);
         planar = (overlayfmt != 0);
         framems = (video->fps == 0.0) ? 0 : ((Uint32) (1000.0 / video->fps));
@@ -701,6 +701,20 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
                         SDL_Rect dstrect = { 0, 0, screen->w, screen->h };
                         SDL_DisplayYUVOverlay(overlay, &dstrect);
                     } // if
+                    else if (opengl)
+                    {
+                        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                        SDL_GL_SwapBuffers();
+                    } // else if
+                    break;
+
+                case SDL_VIDEORESIZE:
+                    assert(opengl);
+                    screen = SDL_SetVideoMode(event.resize.w, event.resize.h, 0, SDL_OPENGL|SDL_RESIZABLE);
+                    glViewport(0, 0, event.resize.w, event.resize.h);
+                    glScissor(0, 0, event.resize.w, event.resize.h);
+                    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+                    SDL_GL_SwapBuffers();
                     break;
 
                 case SDL_QUIT:
