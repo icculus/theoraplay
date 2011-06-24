@@ -6,6 +6,11 @@
  *  This file written by Ryan C. Gordon.
  */
 
+/*
+ * This is meant to be a big, robust test case that handles lots of strange
+ *  variations. If you want a dirt simple version, try sdlsimple.c
+ */
+
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
