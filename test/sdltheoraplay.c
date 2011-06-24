@@ -756,5 +756,5 @@ int main(int argc, char **argv)
     return 0;
 } // main
 
-// end of testtheoraplay.c ...
+// end of sdltheoraplay.c ...
 
