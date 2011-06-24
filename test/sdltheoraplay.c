@@ -57,7 +57,15 @@ static void SDLCALL audio_callback(void *userdata, Uint8 *stream, int len)
             cpy = len / sizeof (Sint16);
 
         for (i = 0; i < cpy; i++)
-            *(dst++) = (Sint16) (*(src++) * 32767.0f);
+        {
+            const float val = *(src++);
+            if (val < -1.0f)
+                *(dst++) = -32768;
+            else if (val > 1.0f)
+                *(dst++) = 32767;
+            else
+                *(dst++) = (Sint16) (val * 32767.0f);
+        } // for
 
         item->offset += (cpy / channels);
         len -= cpy * sizeof (Sint16);
