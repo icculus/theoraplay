@@ -93,7 +93,12 @@ static void SDLCALL audio_callback(void *userdata, Uint8 *stream, int len)
 
 static void queue_audio(const THEORAPLAY_AudioPacket *audio)
 {
-    AudioQueue *item = (AudioQueue *) malloc(sizeof (AudioQueue));
+    AudioQueue *item = NULL;
+
+    if (!audio)
+        return;
+
+    item = (AudioQueue *) malloc(sizeof (AudioQueue));
     if (!item)
     {
         THEORAPLAY_freeAudio(audio);
@@ -356,6 +361,20 @@ static void openglfmt(const THEORAPLAY_VideoFrame *video,
 #endif  // SUPPORT_OPENGL
 
 
+static void queue_more_audio(THEORAPLAY_Decoder *decoder, const Uint32 now)
+{
+    const THEORAPLAY_AudioPacket *audio;
+    while ((audio = THEORAPLAY_getAudio(decoder)) != NULL)
+    {
+        const unsigned int playms = audio->playms;
+        //printf("Got %d frames of audio (%u ms)!\n", audio->frames, audio->playms);
+        queue_audio(audio);
+        if (playms >= now + 2000)  // don't let this get too far ahead.
+            break;
+    } // while
+} // queue_more_audio
+
+
 static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
                      const int opengl)
 {
@@ -524,10 +543,16 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
         initfailed = quit = (initfailed || (SDL_OpenAudio(&spec, NULL) != 0));
     } // if
 
-    baseticks = SDL_GetTicks();
-
     if (!quit && has_audio)
-        SDL_PauseAudio(0);
+    {
+        // queue some audio to start.
+        queue_audio(audio);
+        audio = NULL;
+        queue_more_audio(decoder, 0);
+        SDL_PauseAudio(0);  // start audio playback!
+    } // if
+
+    baseticks = SDL_GetTicks();
 
     while (!quit && THEORAPLAY_isDecoding(decoder))
     {
@@ -661,16 +686,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
             SDL_Delay(10);
         } // else
 
-        if (!audio)
-            audio = THEORAPLAY_getAudio(decoder);
-
-        if (audio)
-        {
-            //printf("Got %d frames of audio (%u ms)!\n",
-            //        audio->frames, audio->playms);
-            queue_audio(audio);
-            audio = NULL;
-        } // if
+        queue_more_audio(decoder, now);
 
         // Pump the event loop here.
         while (screen && SDL_PollEvent(&event))
