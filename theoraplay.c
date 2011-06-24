@@ -687,6 +687,7 @@ const THEORAPLAY_AudioPacket *THEORAPLAY_getAudio(THEORAPLAY_Decoder *decoder)
     retval = ctx->audiolist;
     if (retval)
     {
+        ctx->audioms -= retval->playms;
         ctx->audiolist = retval->next;
         retval->next = NULL;
         if (ctx->audiolist == NULL)
