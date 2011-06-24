@@ -378,11 +378,12 @@ static void queue_more_audio(THEORAPLAY_Decoder *decoder, const Uint32 now)
 
 
 static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
-                     const int opengl)
+                     const int fullscreen, const int opengl)
 {
     THEORAPLAY_Decoder *decoder = NULL;
     const THEORAPLAY_VideoFrame *video = NULL;
     const THEORAPLAY_AudioPacket *audio = NULL;
+    Uint32 vidmodeflags = 0;
     SDL_Surface *screen = NULL;
     SDL_Surface *shadow = NULL;
     SDL_Overlay *overlay = NULL;
@@ -445,12 +446,25 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
 
     if (has_video)
     {
-        const Uint32 flags = opengl ? (SDL_OPENGL|SDL_RESIZABLE) : 0;
         const Uint32 overlayfmt = sdlyuvfmt(vidfmt);
         planar = (overlayfmt != 0);
         framems = (video->fps == 0.0) ? 0 : ((Uint32) (1000.0 / video->fps));
-        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-        screen = SDL_SetVideoMode(video->width, video->height, 0, flags);
+
+        vidmodeflags = 0;
+
+        if (fullscreen)
+        {
+            vidmodeflags |= SDL_FULLSCREEN;
+            SDL_ShowCursor(0);
+        } // if
+
+        if (opengl)
+        {
+            vidmodeflags |= (SDL_OPENGL | SDL_RESIZABLE);
+            SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+        } // if
+
+        screen = SDL_SetVideoMode(video->width, video->height, 0, vidmodeflags);
 
         initfailed = quit = (initfailed || !screen);
 
@@ -710,7 +724,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
 
                 case SDL_VIDEORESIZE:
                     assert(opengl);
-                    screen = SDL_SetVideoMode(event.resize.w, event.resize.h, 0, SDL_OPENGL|SDL_RESIZABLE);
+                    screen = SDL_SetVideoMode(event.resize.w, event.resize.h, 0, vidmodeflags);
                     glViewport(0, 0, event.resize.w, event.resize.h);
                     glScissor(0, 0, event.resize.w, event.resize.h);
                     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
@@ -760,6 +774,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
 int main(int argc, char **argv)
 {
     THEORAPLAY_VideoFormat vidfmt = THEORAPLAY_VIDFMT_YV12;
+    int fullscreen = 0;
     int opengl = 0;
     int i;
 
@@ -779,8 +794,12 @@ int main(int argc, char **argv)
         #endif
         else if (strcmp(argv[i], "--software") == 0)
             opengl = 0;
+        else if (strcmp(argv[i], "--fullscreen") == 0)
+            fullscreen = 1;
+        else if (strcmp(argv[i], "--windowed") == 0)
+            fullscreen = 0;
         else
-            playfile(argv[i], vidfmt, opengl);
+            playfile(argv[i], vidfmt, fullscreen, opengl);
     } // for
 
     printf("done all files!\n");
