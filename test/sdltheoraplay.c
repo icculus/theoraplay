@@ -521,7 +521,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
         spec.channels = audio->channels;
         spec.samples = 2048;
         spec.callback = audio_callback;
-        initfailed = quit = (SDL_OpenAudio(&spec, NULL) != 0);
+        initfailed = quit = (initfailed || (SDL_OpenAudio(&spec, NULL) != 0));
     } // if
 
     baseticks = SDL_GetTicks();
