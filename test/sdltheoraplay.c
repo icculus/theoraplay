@@ -20,10 +20,12 @@
 
 #if SUPPORT_OPENGL
 #define GL_GLEXT_LEGACY 0
+#define GL_GLEXT_PROTOTYPES 1
 #ifdef __APPLE__
 #include <OpenGL/OpenGL.h>
 #else
 #include <GL/gl.h>
+#include <GL/glext.h>
 #endif
 #endif
 
