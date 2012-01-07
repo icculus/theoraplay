@@ -45,11 +45,11 @@ typedef struct THEORAPLAY_VideoFrame
 
 typedef struct THEORAPLAY_AudioPacket
 {
-    unsigned int playms;  // playback start time in milliseconds.
+    unsigned int playms;  /* playback start time in milliseconds. */
     int channels;
     int freq;
     int frames;
-    float *samples;  // frames * channels float32 samples.
+    float *samples;  /* frames * channels float32 samples. */
     struct THEORAPLAY_AudioPacket *next;
 } THEORAPLAY_AudioPacket;
 
