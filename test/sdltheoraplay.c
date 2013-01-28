@@ -380,6 +380,7 @@ static void queue_more_audio(THEORAPLAY_Decoder *decoder, const Uint32 now)
 static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
                      const int fullscreen, const int opengl)
 {
+    const int MAX_FRAMES = 30;
     THEORAPLAY_Decoder *decoder = NULL;
     const THEORAPLAY_VideoFrame *video = NULL;
     const THEORAPLAY_AudioPacket *audio = NULL;
@@ -395,13 +396,14 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
     GLuint texture[3] = { 0, 0, 0 };
     SDL_Event event;
     Uint32 framems = 0;
+    int opened_audio = 0;
     int initfailed = 0;
     int planar = 0;
     int quit = 0;
 
     printf("Trying file '%s' ...\n", fname);
 
-    decoder = THEORAPLAY_startDecodeFile(fname, 30, vidfmt);
+    decoder = THEORAPLAY_startDecodeFile(fname, MAX_FRAMES, vidfmt);
     if (!decoder)
     {
         fprintf(stderr, "Failed to start decoding '%s'!\n", fname);
@@ -430,16 +432,20 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
     } // if
 
     // wait until we have video and/or audio data, so we can set up hardware.
-    if (has_audio)
-    {
-        while ((audio = THEORAPLAY_getAudio(decoder)) == NULL)
-            SDL_Delay(10);
-    } // if
-
     if (has_video)
     {
         while ((video = THEORAPLAY_getVideo(decoder)) == NULL)
             SDL_Delay(10);
+    } // if
+
+    if (has_audio)
+    {
+        while ((audio = THEORAPLAY_getAudio(decoder)) == NULL)
+        {
+            if ((has_video) && (THEORAPLAY_availableVideo(decoder) >= MAX_FRAMES))
+                break;  // we'll never progress, there's no audio yet but we've prebuffered as much as we plan to.
+            SDL_Delay(10);
+        } // while
     } // if
 
     setcaption(fname, opengl, vidfmt, video, audio);
@@ -546,33 +552,38 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
         } // else
     } // if
 
-    // Open the audio device as soon as we know what it should be.
-    if (has_audio)
-    {
-        SDL_AudioSpec spec;
-        memset(&spec, '\0', sizeof (SDL_AudioSpec));
-        spec.freq = audio->freq;
-        spec.format = AUDIO_S16SYS;
-        spec.channels = audio->channels;
-        spec.samples = 2048;
-        spec.callback = audio_callback;
-        initfailed = quit = (initfailed || (SDL_OpenAudio(&spec, NULL) != 0));
-    } // if
-
-    if (!quit && has_audio)
-    {
-        // queue some audio to start.
-        queue_audio(audio);
-        audio = NULL;
-        queue_more_audio(decoder, 0);
-        SDL_PauseAudio(0);  // start audio playback!
-    } // if
-
     baseticks = SDL_GetTicks();
 
     while (!quit && THEORAPLAY_isDecoding(decoder))
     {
         const Uint32 now = SDL_GetTicks() - baseticks;
+
+        // Open the audio device as soon as we know what it should be.
+        if ((has_audio) && (!opened_audio))
+        {
+            if (!audio)
+                audio = THEORAPLAY_getAudio(decoder);
+            if (audio)
+            {
+                SDL_AudioSpec spec;
+                memset(&spec, '\0', sizeof (SDL_AudioSpec));
+                spec.freq = audio->freq;
+                spec.format = AUDIO_S16SYS;
+                spec.channels = audio->channels;
+                spec.samples = 2048;
+                spec.callback = audio_callback;
+                initfailed = quit = (initfailed || (SDL_OpenAudio(&spec, NULL) != 0));
+                if (!quit)
+                {
+                    // queue some audio to start.
+                    opened_audio = 1;
+                    queue_audio(audio);
+                    audio = NULL;
+                    queue_more_audio(decoder, 0);
+                    SDL_PauseAudio(0);  // start audio playback!
+                } // if
+            } // if
+        } // if
 
         if (!video)
             video = THEORAPLAY_getVideo(decoder);
@@ -702,7 +713,8 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
             SDL_Delay(10);
         } // else
 
-        queue_more_audio(decoder, now);
+        if (opened_audio)
+            queue_more_audio(decoder, now);
 
         // Pump the event loop here.
         while (screen && SDL_PollEvent(&event))
@@ -743,7 +755,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
         } // while
     } // while
 
-    if (has_audio)
+    if (opened_audio)
     {
         while (!quit)
         {
@@ -767,7 +779,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
     if (video) THEORAPLAY_freeVideo(video);
     if (audio) THEORAPLAY_freeAudio(audio);
     if (decoder) THEORAPLAY_stopDecode(decoder);
-    if (has_audio) SDL_CloseAudio();
+    if (opened_audio) SDL_CloseAudio();
     SDL_Quit();
 } // playfile
 
