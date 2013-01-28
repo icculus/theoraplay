@@ -614,7 +614,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
             if (!video)  // do nothing; we're far behind and out of options.
             {
                 static int warned = 0;
-                if (warned)
+                if (!warned)
                 {
                     warned = 1;
                     fprintf(stderr, "WARNING: Playback can't keep up!\n");
