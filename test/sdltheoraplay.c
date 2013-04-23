@@ -391,9 +391,11 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
     int has_audio = 0;
     int has_video = 0;
     Uint32 sdlinitflags = 0;
+    #if SUPPORT_OPENGL
     GLenum glfmt = GL_NONE;
     GLenum gltype = GL_NONE;
     GLuint texture[3] = { 0, 0, 0 };
+    #endif
     SDL_Event event;
     Uint32 framems = 0;
     int opened_audio = 0;
@@ -727,13 +729,16 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
                         SDL_Rect dstrect = { 0, 0, screen->w, screen->h };
                         SDL_DisplayYUVOverlay(overlay, &dstrect);
                     } // if
+                    #if SUPPORT_OPENGL
                     else if (opengl)
                     {
                         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
                         SDL_GL_SwapBuffers();
                     } // else if
+                    #endif
                     break;
 
+                #if SUPPORT_OPENGL
                 case SDL_VIDEORESIZE:
                     assert(opengl);
                     screen = SDL_SetVideoMode(event.resize.w, event.resize.h, 0, vidmodeflags);
@@ -742,6 +747,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
                     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
                     SDL_GL_SwapBuffers();
                     break;
+                #endif
 
                 case SDL_QUIT:
                     quit = 1;
