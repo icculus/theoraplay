@@ -627,7 +627,7 @@ THEORAPLAY_Decoder *THEORAPLAY_startDecode(THEORAPLAY_Io *io,
         default: goto startdecode_failed;  // invalid/unsupported format.
     } // switch
 
-    ctx = malloc(sizeof (TheoraDecoder));
+    ctx = (TheoraDecoder *) malloc(sizeof (TheoraDecoder));
     if (ctx == NULL)
         goto startdecode_failed;
 
