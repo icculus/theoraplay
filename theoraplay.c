@@ -19,8 +19,11 @@
 #include <windows.h>
 #define THEORAPLAY_THREAD_T    HANDLE
 #define THEORAPLAY_MUTEX_T     HANDLE
+#define sleepms(x) Sleep(x)
 #else
 #include <pthread.h>
+#include <unistd.h>
+#define sleepms(x) usleep((x) * 1000)
 #define THEORAPLAY_THREAD_T    pthread_t
 #define THEORAPLAY_MUTEX_T     pthread_mutex_t
 #endif
@@ -530,7 +533,7 @@ static void WorkerThread(TheoraDecoder *ctx)
                 go_on = !ctx->halt && (ctx->videocount >= ctx->maxframes);
                 Mutex_Unlock(ctx->lock);
                 if (go_on)
-                    usleep(10000);
+                    sleepms(10);
             } // while
             //printf("Awake!\n");
         } // if
