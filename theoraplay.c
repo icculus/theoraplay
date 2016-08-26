@@ -215,7 +215,6 @@ static void WorkerThread(TheoraDecoder *ctx)
     } while (0)
 
     unsigned long audioframes = 0;
-    unsigned long videoframes = 0;
     double fps = 0.0;
     int was_error = 1;  // resets to 0 at the end.
     int eos = 0;  // end of stream flag.
@@ -460,17 +459,20 @@ static void WorkerThread(TheoraDecoder *ctx)
             else
             {
                 ogg_int64_t granulepos = 0;
-                const int rc = th_decode_packetin(tdec, &packet, &granulepos);
-                if (rc == TH_DUPFRAME)
-                    videoframes++;  // nothing else to do.
-                else if (rc == 0)  // new frame!
+
+                // you have to guide the Theora decoder to get meaningful timestamps, apparently.  :/
+                if (packet.granulepos >= 0)
+                    th_decode_ctl(tdec, TH_DECCTL_SET_GRANPOS, &packet.granulepos, sizeof(packet.granulepos));
+
+                if (th_decode_packetin(tdec, &packet, &granulepos) == 0)  // new frame!
                 {
                     th_ycbcr_buffer ycbcr;
                     if (th_decode_ycbcr_out(tdec, ycbcr) == 0)
                     {
+                        const double videotime = th_granule_time(tdec, granulepos);
                         VideoFrame *item = (VideoFrame *) malloc(sizeof (VideoFrame));
                         if (item == NULL) goto cleanup;
-                        item->playms = (fps == 0) ? 0 : (unsigned int) ((((double) videoframes) / fps) * 1000.0);
+                        item->playms = (unsigned int) (videotime * 1000.0);
                         item->fps = fps;
                         item->width = tinfo.pic_width;
                         item->height = tinfo.pic_height;
@@ -502,7 +504,6 @@ static void WorkerThread(TheoraDecoder *ctx)
 
                         saw_video_frame = 1;
                     } // if
-                    videoframes++;
                 } // if
             } // else
         } // if
