@@ -67,7 +67,7 @@ static void SDLCALL audio_callback(void *userdata, Uint8 *stream, int len)
         if (item->offset >= item->audio->frames)
         {
             THEORAPLAY_freeAudio(item->audio);
-            free((void *) item);
+            SDL_free((void *) item);
             audio_queue = next;
         } // if
     } // while
@@ -82,7 +82,7 @@ static void SDLCALL audio_callback(void *userdata, Uint8 *stream, int len)
 
 static void queue_audio(const THEORAPLAY_AudioPacket *audio)
 {
-    AudioQueue *item = (AudioQueue *) malloc(sizeof (AudioQueue));
+    AudioQueue *item = (AudioQueue *) SDL_malloc(sizeof (AudioQueue));
     if (!item)
     {
         THEORAPLAY_freeAudio(audio);
