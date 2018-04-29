@@ -52,15 +52,22 @@ static unsigned char *ConvertVideoFrame420ToYUVPlanar(
     const int yoff = (tinfo->pic_x & ~1) + ycbcr[0].stride * (tinfo->pic_y & ~1);
     const int uvoff = (tinfo->pic_x / 2) + (ycbcr[1].stride) * (tinfo->pic_y / 2);
     unsigned char *yuv = (unsigned char *) malloc(w * h * 2);
+    const unsigned char *p0data = ycbcr[p0].data + yoff;
+    const int p0stride = ycbcr[p0].stride;
+    const unsigned char *p1data = ycbcr[p1].data + uvoff;
+    const int p1stride = ycbcr[p1].stride;
+    const unsigned char *p2data = ycbcr[p2].data + uvoff;
+    const int p2stride = ycbcr[p2].stride;
+
     if (yuv)
     {
         unsigned char *dst = yuv;
         for (i = 0; i < h; i++, dst += w)
-            memcpy(dst, ycbcr[p0].data + yoff + ycbcr[p0].stride * i, w);
+            memcpy(dst, p0data + (p0stride * i), w);
         for (i = 0; i < (h / 2); i++, dst += w/2)
-            memcpy(dst, ycbcr[p1].data + uvoff + ycbcr[p1].stride * i, w / 2);
+            memcpy(dst, p1data + (p1stride * i), w / 2);
         for (i = 0; i < (h / 2); i++, dst += w/2)
-            memcpy(dst, ycbcr[p2].data + uvoff + ycbcr[p2].stride * i, w / 2);
+            memcpy(dst, p2data + (p2stride * i), w / 2);
     } // if
 
     return yuv;
