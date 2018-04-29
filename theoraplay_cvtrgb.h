@@ -15,7 +15,21 @@ static unsigned char *THEORAPLAY_CVT_FNNAME_420(const th_info *tinfo,
 {
     const int w = tinfo->pic_width;
     const int h = tinfo->pic_height;
+    const int halfw = w / 2;
     unsigned char *pixels = (unsigned char *) malloc(w * h * 4);
+
+    // http://www.theora.org/doc/Theora.pdf, 1.1 spec,
+    //  chapter 4.2 (Y'CbCr -> Y'PbPr -> R'G'B')
+    // These constants apparently work for NTSC _and_ PAL/SECAM.
+    const float yoffset = 16.0f;
+    const float yexcursion = 219.0f;
+    const float cboffset = 128.0f;
+    const float cbexcursion = 224.0f;
+    const float croffset = 128.0f;
+    const float crexcursion = 224.0f;
+    const float kr = 0.299f;
+    const float kb = 0.114f;
+
     if (pixels)
     {
         unsigned char *dst = pixels;
@@ -27,34 +41,36 @@ static unsigned char *THEORAPLAY_CVT_FNNAME_420(const th_info *tinfo,
         const unsigned char *py = ycbcr[0].data + yoff;
         const unsigned char *pcb = ycbcr[1].data + cboff;
         const unsigned char *pcr = ycbcr[2].data + cboff;
-        int posx, posy;
+        int posy;
 
         for (posy = 0; posy < h; posy++)
         {
-            for (posx = 0; posx < w; posx++)
+            int posx, poshalfx;
+
+            posx = 0;
+            for (poshalfx = 0; poshalfx < halfw; poshalfx++, posx += 2)
             {
-                // http://www.theora.org/doc/Theora.pdf, 1.1 spec,
-                //  chapter 4.2 (Y'CbCr -> Y'PbPr -> R'G'B')
-                // These constants apparently work for NTSC _and_ PAL/SECAM.
-                const float yoffset = 16.0f;
-                const float yexcursion = 219.0f;
-                const float cboffset = 128.0f;
-                const float cbexcursion = 224.0f;
-                const float croffset = 128.0f;
-                const float crexcursion = 224.0f;
-                const float kr = 0.299f;
-                const float kb = 0.114f;
+                const float y1 = (((float) py[posx]) - yoffset) / yexcursion;
+                const float y2 = (((float) py[posx+1]) - yoffset) / yexcursion;
+                const float pb = (((float) pcb[poshalfx]) - cboffset) / cbexcursion;
+                const float pr = (((float) pcr[poshalfx]) - croffset) / crexcursion;
+                const float r1 = (y1 + (2.0f * (1.0f - kr) * pr)) * 255.0f;
+                const float g1 = (y1 - ((2.0f * (((1.0f - kb) * kb) / ((1.0f - kb) - kr))) * pb) - ((2.0f * (((1.0f - kr) * kr) / ((1.0f - kb) - kr))) * pr)) * 255.0f;
+                const float b1 = (y1 + (2.0f * (1.0f - kb) * pb)) * 255.0f;
+                const float r2 = (y2 + (2.0f * (1.0f - kr) * pr)) * 255.0f;
+                const float g2 = (y2 - ((2.0f * (((1.0f - kb) * kb) / ((1.0f - kb) - kr))) * pb) - ((2.0f * (((1.0f - kr) * kr) / ((1.0f - kb) - kr))) * pr)) * 255.0f;
+                const float b2 = (y2 + (2.0f * (1.0f - kb) * pb)) * 255.0f;
 
-                const float y = (((float) py[posx]) - yoffset) / yexcursion;
-                const float pb = (((float) pcb[posx / 2]) - cboffset) / cbexcursion;
-                const float pr = (((float) pcr[posx / 2]) - croffset) / crexcursion;
-                const float r = (y + (2.0f * (1.0f - kr) * pr)) * 255.0f;
-                const float g = (y - ((2.0f * (((1.0f - kb) * kb) / ((1.0f - kb) - kr))) * pb) - ((2.0f * (((1.0f - kr) * kr) / ((1.0f - kb) - kr))) * pr)) * 255.0f;
-                const float b = (y + (2.0f * (1.0f - kb) * pb)) * 255.0f;
+                *(dst++) = (unsigned char) ((r1 < 0.0f) ? 0.0f : (r1 > 255.0f) ? 255.0f : r1);
+                *(dst++) = (unsigned char) ((g1 < 0.0f) ? 0.0f : (g1 > 255.0f) ? 255.0f : g1);
+                *(dst++) = (unsigned char) ((b1 < 0.0f) ? 0.0f : (b1 > 255.0f) ? 255.0f : b1);
+                #if THEORAPLAY_CVT_RGB_ALPHA
+                *(dst++) = 0xFF;
+                #endif
 
-                *(dst++) = (unsigned char) ((r < 0.0f) ? 0.0f : (r > 255.0f) ? 255.0f : r);
-                *(dst++) = (unsigned char) ((g < 0.0f) ? 0.0f : (g > 255.0f) ? 255.0f : g);
-                *(dst++) = (unsigned char) ((b < 0.0f) ? 0.0f : (b > 255.0f) ? 255.0f : b);
+                *(dst++) = (unsigned char) ((r2 < 0.0f) ? 0.0f : (r2 > 255.0f) ? 255.0f : r2);
+                *(dst++) = (unsigned char) ((g2 < 0.0f) ? 0.0f : (g2 > 255.0f) ? 255.0f : g2);
+                *(dst++) = (unsigned char) ((b2 < 0.0f) ? 0.0f : (b2 > 255.0f) ? 255.0f : b2);
                 #if THEORAPLAY_CVT_RGB_ALPHA
                 *(dst++) = 0xFF;
                 #endif
