@@ -742,13 +742,13 @@ int THEORAPLAY_hasAudioStream(THEORAPLAY_Decoder *decoder)
 unsigned int THEORAPLAY_availableVideo(THEORAPLAY_Decoder *decoder)
 {
     GET_SYNCED_VALUE(unsigned int, 0, decoder, videocount);
-} // THEORAPLAY_hasAudioStream
+} // THEORAPLAY_availableVideo
 
 
 unsigned int THEORAPLAY_availableAudio(THEORAPLAY_Decoder *decoder)
 {
     GET_SYNCED_VALUE(unsigned int, 0, decoder, audioms);
-} // THEORAPLAY_hasAudioStream
+} // THEORAPLAY_availableAudio
 
 
 int THEORAPLAY_decodingError(THEORAPLAY_Decoder *decoder)
