@@ -537,7 +537,7 @@ static void playfile(const char *fname, const THEORAPLAY_VideoFormat vidfmt,
             {
                 const int alpha = (vidfmt == THEORAPLAY_VIDFMT_RGBA);
                 const int bits = 24 + (alpha * 8);
-                const Uint32 rmask = SDL_SwapLE32(0xFF0000FF);
+                const Uint32 rmask = SDL_SwapLE32(0x000000FF);
                 const Uint32 gmask = SDL_SwapLE32(0x0000FF00);
                 const Uint32 bmask = SDL_SwapLE32(0x00FF0000);
                 const Uint32 amask = 0x00000000;
