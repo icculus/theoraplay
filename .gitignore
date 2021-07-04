@@ -1,4 +1,3 @@
-syntax:glob
 test/*.dSYM
 test/*.exe
 test/testtheoraplay
