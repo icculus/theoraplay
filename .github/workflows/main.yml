@@ -17,7 +17,7 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install libsdl1.2-dev libtheora-dev
+        sudo apt-get install libsdl1.2-dev libtheora-dev libvorbis-dev
     - name: Get theoraplay sources
       uses: actions/checkout@v2
     - name: Build
