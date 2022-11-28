@@ -823,5 +823,5 @@ void THEORAPLAY_freeVideo(const THEORAPLAY_VideoFrame *_item)
     } // if
 } // THEORAPLAY_freeVideo
 
-// end of theoraplay.cpp ...
+// end of theoraplay.c ...
 
