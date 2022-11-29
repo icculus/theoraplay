@@ -10,6 +10,8 @@
 //  libtheora-1.1.1/examples/player_example.c, but this is all my own
 //  code.
 
+// !!! FIXME: can we move this off malloc to a custom allocator?
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -103,6 +105,7 @@ static unsigned char *ConvertVideoFrame420ToIYUV(const th_info *tinfo,
 #undef THEORAPLAY_CVT_FNNAME_420
 
 
+// !!! FIXME: these volatiles really need to become atomics.
 typedef struct TheoraDecoder
 {
     // Thread wrangling...
@@ -121,6 +124,8 @@ typedef struct TheoraDecoder
     volatile int hasvideo;
     volatile int hasaudio;
     volatile int decode_error;
+    volatile unsigned int seek_generation;
+    volatile unsigned long new_seek_position_ms;
 
     THEORAPLAY_VideoFormat vidfmt;
     ConvertVideoFrameFn vidcvt;
@@ -221,7 +226,8 @@ static void WorkerThread(TheoraDecoder *ctx)
         if (vpackets) ogg_stream_pagein(&vstream, &page); \
     } while (0)
 
-    unsigned long audioframes = 0;
+    long streamlen = -1;
+    unsigned int current_seek_generation = 0;
     double fps = 0.0;
     int was_error = 1;  // resets to 0 at the end.
     int eos = 0;  // end of stream flag.
@@ -231,12 +237,14 @@ static void WorkerThread(TheoraDecoder *ctx)
     ogg_sync_state sync;
     ogg_page page;
     int vpackets = 0;
+    int vserialno = 0;
     vorbis_info vinfo;
     vorbis_comment vcomment;
     ogg_stream_state vstream;
     int vdsp_init = 0;
     vorbis_dsp_state vdsp;
     int tpackets = 0;
+    int tserialno = 0;
     th_info tinfo;
     th_comment tcomment;
     ogg_stream_state tstream;
@@ -244,6 +252,11 @@ static void WorkerThread(TheoraDecoder *ctx)
     vorbis_block vblock;
     th_dec_ctx *tdec = NULL;
     th_setup_info *tsetup = NULL;
+    ogg_int64_t granulepos = 0;
+    int resolving_audio_seek = 0;
+    int resolving_video_seek = 0;
+    int need_keyframe = 0;
+    unsigned long seek_target = 0;
 
     ogg_sync_init(&sync);
     vorbis_info_init(&vinfo);
@@ -261,6 +274,7 @@ static void WorkerThread(TheoraDecoder *ctx)
         while ( (!ctx->halt) && (ogg_sync_pageout(&sync, &page) > 0) )
         {
             ogg_stream_state test;
+            int serialno;
 
             if (!ogg_page_bos(&page))  // not a header.
             {
@@ -269,7 +283,8 @@ static void WorkerThread(TheoraDecoder *ctx)
                 break;
             } // if
 
-            ogg_stream_init(&test, ogg_page_serialno(&page));
+            serialno = ogg_page_serialno(&page);
+            ogg_stream_init(&test, serialno);
             ogg_stream_pagein(&test, &page);
             ogg_stream_packetout(&test, &packet);
 
@@ -277,11 +292,13 @@ static void WorkerThread(TheoraDecoder *ctx)
             {
                 memcpy(&tstream, &test, sizeof (test));
                 tpackets = 1;
+                tserialno = serialno;
             } // if
             else if (!vpackets && (vorbis_synthesis_headerin(&vinfo, &vcomment, &packet) >= 0))
             {
                 memcpy(&vstream, &test, sizeof (test));
                 vpackets = 1;
+                vserialno = serialno;
             } // else if
             else
             {
@@ -386,60 +403,175 @@ static void WorkerThread(TheoraDecoder *ctx)
         int need_pages = 0;  // need more Ogg pages?
         int saw_video_frame = 0;
 
+        if (current_seek_generation != ctx->seek_generation)  // seek requested
+        {
+            unsigned long targetms;
+            long seekpos;
+            long lo, hi;
+
+            if (!ctx->io->seek)
+                goto cleanup;  // seeking unsupported.
+
+            if (streamlen == -1)  // just check this once in case it's expensive.
+            {
+                streamlen = ctx->io->streamlen ? ctx->io->streamlen(ctx->io) : -1;
+                if (streamlen == -1)
+                    goto cleanup;  // i/o error, unsupported, etc.
+            } // if
+
+            // We check ctx->seek_generation without a lock as this goes on, so if they mismatch we
+            //  drop what we're doing and prepare to seek to a new location. But here we hold a lock
+            //  so we can avoid the race condition where the app is halfway through requesting a
+            //  seek while we're reading in these variables.
+            Mutex_Lock(ctx->lock);
+            current_seek_generation = ctx->seek_generation;
+            targetms = ctx->new_seek_position_ms;
+            Mutex_Unlock(ctx->lock);
+
+            lo = 0;
+            hi = streamlen;
+
+            if (targetms == 0)
+                hi = 0;  /* as an optimization, just jump to the start of file if rewinding to start instead of binary searching. */
+
+            seekpos = (lo / 2) + (hi / 2);
+
+            while ((!ctx->halt) && (current_seek_generation == ctx->seek_generation))
+            {
+                //const int max_keyframe_distance = 1 << tinfo.keyframe_granule_shift;
+
+                // Do a binary search through the stream to find our starting point.
+                // This idea came from libtheoraplayer (no relation to theoraplay).
+                if (ctx->io->seek(ctx->io, seekpos) == -1)
+                    goto cleanup;  // oh well.
+
+                granulepos = -1;
+                ogg_sync_reset(&sync);
+                memset(&page, '\0', sizeof (page));
+                ogg_sync_pageseek(&sync, &page);
+
+                while (!ctx->halt && (current_seek_generation == ctx->seek_generation))
+                {
+                    if (ogg_sync_pageout(&sync, &page) != 1)
+                    {
+                        if (FeedMoreOggData(ctx->io, &sync) <= 0)
+                            goto cleanup;
+                        continue;
+                    } // if
+
+                    granulepos = ogg_page_granulepos(&page);
+                    if (granulepos >= 0)
+                    {
+                        const int serialno = ogg_page_serialno(&page);
+                        unsigned long ms;
+
+                        if (tpackets)  // always tee off video frames if possible.
+                        {
+                            if (serialno != tserialno)
+                                continue;
+                            ms = (unsigned long) (th_granule_time(tdec, granulepos) * 1000.0);
+                        } // else
+                        else
+                        {
+                            if (serialno != vserialno)
+                                continue;
+                            ms = (unsigned long) (vorbis_granule_time(&vdsp, granulepos) * 1000.0);
+                        } // else
+
+                        if ((ms < targetms) && ((targetms - ms) <= 250))   // !!! FIXME: tweak this number?
+                            hi = lo;  // found something close enough to the target!
+                        else  // adjust binary search position and try again.
+                        {
+                            const long newpos = (lo / 2) + (hi / 2);
+                            if (targetms > ms)
+                                lo = newpos;
+                            else
+                                hi = newpos;
+                        } // else
+                        break;
+                    } // if
+                } // while
+
+                const long newseekpos = (lo / 2) + (hi / 2);
+                if (seekpos == newseekpos)
+                    break;  // we did the best we could, just go from here.
+                seekpos = newseekpos;
+            } // while
+
+            // at this point, we have seek'd to something reasonably close to our target. Now decode until we're as close as possible to it.
+            vorbis_synthesis_restart(&vdsp);
+            resolving_audio_seek = vpackets;
+            resolving_video_seek = tpackets;
+            seek_target = targetms;
+            need_keyframe = tpackets;
+        } // if
+
         // Try to read as much audio as we can at once. We limit the outer
         //  loop to one video frame and as much audio as we can eat.
         while (!ctx->halt && vpackets)
         {
+            const double audiotime = vorbis_granule_time(&vdsp, vdsp.granulepos);
+            const unsigned int playms = (unsigned int) (audiotime * 1000.0);
             float **pcm = NULL;
-            const int frames = vorbis_synthesis_pcmout(&vdsp, &pcm);
+            int frames;
+
+            if (current_seek_generation != ctx->seek_generation)
+                break;  // seek requested? Break out of the loop right away so we can handle it; this loop's work would be wasted.
+
+            if (resolving_audio_seek && ((playms >= seek_target) || ((seek_target - playms) <= (unsigned long) (1000.0 / fps))))
+                resolving_audio_seek = 0;
+
+            frames = vorbis_synthesis_pcmout(&vdsp, &pcm);
             if (frames > 0)
             {
-                const int channels = vinfo.channels;
-                int chanidx, frameidx;
-                float *samples;
-                AudioPacket *item = (AudioPacket *) malloc(sizeof (AudioPacket));
-                if (item == NULL) goto cleanup;
-                item->playms = (unsigned long) ((((double) audioframes) / ((double) vinfo.rate)) * 1000.0);
-                item->channels = channels;
-                item->freq = vinfo.rate;
-                item->frames = frames;
-                item->samples = (float *) malloc(sizeof (float) * frames * channels);
-                item->next = NULL;
-
-                if (item->samples == NULL)
+                if (!resolving_audio_seek)
                 {
-                    free(item);
-                    goto cleanup;
+                    const int channels = vinfo.channels;
+                    int chanidx, frameidx;
+                    float *samples;
+                    AudioPacket *item = (AudioPacket *) malloc(sizeof (AudioPacket));
+                    if (item == NULL) goto cleanup;
+                    item->seek_generation = current_seek_generation;
+                    item->playms = playms;
+                    item->channels = channels;
+                    item->freq = vinfo.rate;
+                    item->frames = frames;
+                    item->samples = (float *) malloc(sizeof (float) * frames * channels);
+                    item->next = NULL;
+
+                    if (item->samples == NULL)
+                    {
+                        free(item);
+                        goto cleanup;
+                    } // if
+
+                    // I bet this beats the crap out of the CPU cache...
+                    samples = item->samples;
+                    for (frameidx = 0; frameidx < frames; frameidx++)
+                    {
+                        for (chanidx = 0; chanidx < channels; chanidx++)
+                            *(samples++) = pcm[chanidx][frameidx];
+                    } // for
+
+                    //printf("Decoded %d frames of audio.\n", (int) frames);
+                    Mutex_Lock(ctx->lock);
+                    ctx->audioms += item->playms;
+                    if (ctx->audiolisttail)
+                    {
+                        assert(ctx->audiolist);
+                        ctx->audiolisttail->next = item;
+                    } // if
+                    else
+                    {
+                        assert(!ctx->audiolist);
+                        ctx->audiolist = item;
+                    } // else
+                    ctx->audiolisttail = item;
+                    Mutex_Unlock(ctx->lock);
                 } // if
-
-                // I bet this beats the crap out of the CPU cache...
-                samples = item->samples;
-                for (frameidx = 0; frameidx < frames; frameidx++)
-                {
-                    for (chanidx = 0; chanidx < channels; chanidx++)
-                        *(samples++) = pcm[chanidx][frameidx];
-                } // for
 
                 vorbis_synthesis_read(&vdsp, frames);  // we ate everything.
-                audioframes += frames;
-
-                //printf("Decoded %d frames of audio.\n", (int) frames);
-                Mutex_Lock(ctx->lock);
-                ctx->audioms += item->playms;
-                if (ctx->audiolisttail)
-                {
-                    assert(ctx->audiolist);
-                    ctx->audiolisttail->next = item;
-                } // if
-                else
-                {
-                    assert(!ctx->audiolist);
-                    ctx->audiolist = item;
-                } // else
-                ctx->audiolisttail = item;
-                Mutex_Unlock(ctx->lock);
             } // if
-
             else  // no audio available left in current packet?
             {
                 // try to feed another packet to the Vorbis stream...
@@ -457,7 +589,7 @@ static void WorkerThread(TheoraDecoder *ctx)
             } // else
         } // while
 
-        if (!ctx->halt && tpackets)
+        if (!ctx->halt && tpackets && (current_seek_generation == ctx->seek_generation))
         {
             // Theora, according to example_player.c, is
             //  "one [packet] in, one [frame] out."
@@ -465,57 +597,67 @@ static void WorkerThread(TheoraDecoder *ctx)
                 need_pages = 1;
             else
             {
-                ogg_int64_t granulepos = 0;
-
                 // you have to guide the Theora decoder to get meaningful timestamps, apparently.  :/
                 if (packet.granulepos >= 0)
-                    th_decode_ctl(tdec, TH_DECCTL_SET_GRANPOS, &packet.granulepos, sizeof(packet.granulepos));
+                    th_decode_ctl(tdec, TH_DECCTL_SET_GRANPOS, &packet.granulepos, sizeof (packet.granulepos));
 
                 if (th_decode_packetin(tdec, &packet, &granulepos) == 0)  // new frame!
                 {
-                    th_ycbcr_buffer ycbcr;
-                    if (th_decode_ycbcr_out(tdec, ycbcr) == 0)
+                    const double videotime = th_granule_time(tdec, granulepos);
+                    const unsigned int playms = (unsigned int) (videotime * 1000.0);
+
+                    if (need_keyframe && th_packet_iskeyframe(&packet))
+                        need_keyframe = 0;
+
+                    if (resolving_video_seek && !need_keyframe && ((playms >= seek_target) || ((seek_target - playms) <= (unsigned long) (1000.0 / fps))))
+                        resolving_video_seek = 0;
+
+                    if (!resolving_video_seek)
                     {
-                        const double videotime = th_granule_time(tdec, granulepos);
-                        VideoFrame *item = (VideoFrame *) malloc(sizeof (VideoFrame));
-                        if (item == NULL) goto cleanup;
-                        item->playms = (unsigned int) (videotime * 1000.0);
-                        item->fps = fps;
-                        item->width = tinfo.pic_width;
-                        item->height = tinfo.pic_height;
-                        item->format = ctx->vidfmt;
-                        item->pixels = ctx->vidcvt(&tinfo, ycbcr);
-                        item->next = NULL;
-
-                        if (item->pixels == NULL)
+                        th_ycbcr_buffer ycbcr;
+                        if (th_decode_ycbcr_out(tdec, ycbcr) == 0)
                         {
-                            free(item);
-                            goto cleanup;
+                            VideoFrame *item = (VideoFrame *) malloc(sizeof (VideoFrame));
+                            if (item == NULL) goto cleanup;
+                            item->seek_generation = current_seek_generation;
+                            item->playms = playms;
+                            item->fps = fps;
+                            item->width = tinfo.pic_width;
+                            item->height = tinfo.pic_height;
+                            item->format = ctx->vidfmt;
+                            item->pixels = ctx->vidcvt(&tinfo, ycbcr);
+                            item->next = NULL;
+
+                            if (item->pixels == NULL)
+                            {
+                                free(item);
+                                goto cleanup;
+                            } // if
+
+                            //printf("Decoded another video frame.\n");
+                            Mutex_Lock(ctx->lock);
+                            if (ctx->videolisttail)
+                            {
+                                assert(ctx->videolist);
+                                ctx->videolisttail->next = item;
+                            } // if
+                            else
+                            {
+                                assert(!ctx->videolist);
+                                ctx->videolist = item;
+                            } // else
+                            ctx->videolisttail = item;
+                            ctx->videocount++;
+                            Mutex_Unlock(ctx->lock);
+
+                            saw_video_frame = 1;
                         } // if
-
-                        //printf("Decoded another video frame.\n");
-                        Mutex_Lock(ctx->lock);
-                        if (ctx->videolisttail)
-                        {
-                            assert(ctx->videolist);
-                            ctx->videolisttail->next = item;
-                        } // if
-                        else
-                        {
-                            assert(!ctx->videolist);
-                            ctx->videolist = item;
-                        } // else
-                        ctx->videolisttail = item;
-                        ctx->videocount++;
-                        Mutex_Unlock(ctx->lock);
-
-                        saw_video_frame = 1;
                     } // if
                 } // if
             } // else
         } // if
 
-        if (!ctx->halt && need_pages)
+        if (!ctx->halt && need_pages && (current_seek_generation == ctx->seek_generation))
         {
             const int rc = FeedMoreOggData(ctx->io, &sync);
             if (rc == 0)
@@ -575,7 +717,6 @@ static void *WorkerThreadEntry(void *_this)
     return NULL;
 } // WorkerThreadEntry
 
-
 static long IoFopenRead(THEORAPLAY_Io *io, void *buf, long buflen)
 {
     FILE *f = (FILE *) io->userdata;
@@ -585,6 +726,23 @@ static long IoFopenRead(THEORAPLAY_Io *io, void *buf, long buflen)
     return (long) br;
 } // IoFopenRead
 
+static long IoFopenStreamLen(THEORAPLAY_Io *io)
+{
+    FILE *f = (FILE *) io->userdata;
+    const long origpos = ftell(f);
+    long retval = -1;
+    if (fseek(f, 0, SEEK_END) == 0) {
+        retval = ftell(f);
+    }
+    fseek(f, origpos, SEEK_SET);
+    return retval;
+} // IoFopenStreamLen
+
+static int IoFopenSeek(THEORAPLAY_Io *io, long absolute_offset)
+{
+    FILE *f = (FILE *) io->userdata;
+    return fseek(f, absolute_offset, SEEK_SET);
+} // IoFopenSeek
 
 static void IoFopenClose(THEORAPLAY_Io *io)
 {
@@ -610,6 +768,8 @@ THEORAPLAY_Decoder *THEORAPLAY_startDecodeFile(const char *fname,
     } // if
 
     io->read = IoFopenRead;
+    io->seek = IoFopenSeek;
+    io->streamlen = IoFopenStreamLen;
     io->close = IoFopenClose;
     io->userdata = f;
     return THEORAPLAY_startDecode(io, maxframes, vidfmt);
@@ -822,6 +982,18 @@ void THEORAPLAY_freeVideo(const THEORAPLAY_VideoFrame *_item)
         free(item);
     } // if
 } // THEORAPLAY_freeVideo
+
+
+unsigned int THEORAPLAY_seek(THEORAPLAY_Decoder *decoder, unsigned long mspos)
+{
+    unsigned int retval;
+    TheoraDecoder *ctx = (TheoraDecoder *) decoder;
+    Mutex_Lock(ctx->lock);
+    ctx->new_seek_position_ms = mspos;
+    retval = ++ctx->seek_generation;
+    Mutex_Unlock(ctx->lock);
+    return retval;
+} // THEORAPLAY_seek
 
 // end of theoraplay.c ...
 
