@@ -174,30 +174,12 @@ static inline void Mutex_Unlock(THEORAPLAY_MUTEX_T mutex)
     ReleaseMutex(mutex);
 }
 #else
-static inline int Thread_Create(TheoraDecoder *ctx, void *(*routine) (void*))
-{
-    return pthread_create(&ctx->worker, NULL, routine, ctx);
-}
-static inline void Thread_Join(THEORAPLAY_THREAD_T thread)
-{
-    pthread_join(thread, NULL);
-}
-static inline int Mutex_Create(TheoraDecoder *ctx)
-{
-    return pthread_mutex_init(&ctx->lock, NULL);
-}
-static inline void Mutex_Destroy(THEORAPLAY_MUTEX_T mutex)
-{
-    pthread_mutex_destroy(&mutex);
-}
-static inline void Mutex_Lock(THEORAPLAY_MUTEX_T mutex)
-{
-    pthread_mutex_lock(&mutex);
-}
-static inline void Mutex_Unlock(THEORAPLAY_MUTEX_T mutex)
-{
-    pthread_mutex_unlock(&mutex);
-}
+#define Thread_Create(ctx, routine)     pthread_create(&ctx->worker, NULL, routine, ctx)
+#define Thread_Join(thread)             pthread_join(thread, NULL)
+#define Mutex_Create(ctx)               pthread_mutex_init(&ctx->lock, NULL)
+#define Mutex_Destroy(mutex)            pthread_mutex_destroy(&mutex)
+#define Mutex_Lock(mutex)               pthread_mutex_lock(&mutex)
+#define Mutex_Unlock(mutex)             pthread_mutex_unlock(&mutex)
 #endif
 
 
@@ -795,7 +777,7 @@ THEORAPLAY_Decoder *THEORAPLAY_startDecode(THEORAPLAY_Io *io,
         default: goto startdecode_failed;  // invalid/unsupported format.
     } // switch
 
-    ctx = (TheoraDecoder *) malloc(sizeof (TheoraDecoder));
+    ctx = (TheoraDecoder *) calloc(1, sizeof (TheoraDecoder));
     if (ctx == NULL)
         goto startdecode_failed;
 
